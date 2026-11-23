@@ -12,3 +12,13 @@ node_modules/
 dist/
 .env.local
 
+# Android build artifacts
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+.cxx/
+!apps/android/app/src/main/jniLibs/**
+
+
