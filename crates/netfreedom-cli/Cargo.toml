@@ -1,0 +1,19 @@
+[package]
+name = "netfreedom-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+netfreedom-common = { path = "../netfreedom-common" }
+netfreedom-health = { path = "../netfreedom-health" }
+netfreedom-vpn = { path = "../netfreedom-vpn" }
+netfreedom-dpi = { path = "../netfreedom-dpi" }
+netfreedom-tun = { path = "../netfreedom-tun" }
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
