@@ -1,0 +1,20 @@
+[package]
+name = "netfreedom-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+netfreedom-common = { path = "../netfreedom-common" }
+netfreedom-health = { path = "../netfreedom-health" }
+netfreedom-vpn = { path = "../netfreedom-vpn" }
+netfreedom-dpi = { path = "../netfreedom-dpi" }
+netfreedom-tun = { path = "../netfreedom-tun" }
+netfreedom-security = { path = "../netfreedom-security" }
+netfreedom-dns = { path = "../netfreedom-dns" }
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
