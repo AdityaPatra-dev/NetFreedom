@@ -3,6 +3,8 @@ name = "netfreedom-desktop"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [build-dependencies]
 tauri-build = { version = "2.0", default-features = false }
 

@@ -43,29 +43,35 @@ C_SOURCES=(
     "${BYEDPI_DIR}/main.c"
 )
 
+# Detect clang compilers for each ABI dynamically
+CLANG_ARM64=$(find "${TOOLCHAIN}" -maxdepth 1 -name "aarch64-linux-android*-clang" | grep -E 'android[0-9]+-clang$' | sort -V | tail -n 1 || true)
+CLANG_ARM32=$(find "${TOOLCHAIN}" -maxdepth 1 -name "armv7a-linux-androideabi*-clang" | grep -E 'androideabi[0-9]+-clang$' | sort -V | tail -n 1 || true)
+CLANG_X86_64=$(find "${TOOLCHAIN}" -maxdepth 1 -name "x86_64-linux-android*-clang" | grep -E 'android[0-9]+-clang$' | sort -V | tail -n 1 || true)
+CLANG_X86=$(find "${TOOLCHAIN}" -maxdepth 1 -name "i686-linux-android*-clang" | grep -E 'android[0-9]+-clang$' | sort -V | tail -n 1 || true)
+
 mkdir -p "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a"
 mkdir -p "${ANDROID_DIR}/app/src/main/jniLibs/armeabi-v7a"
 mkdir -p "${ANDROID_DIR}/app/src/main/jniLibs/x86_64"
 mkdir -p "${ANDROID_DIR}/app/src/main/jniLibs/x86"
 
 # arm64-v8a
-echo " -> Compiling ciadpi for arm64-v8a..."
-"${TOOLCHAIN}/aarch64-linux-android35-clang" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
+echo " -> Compiling ciadpi for arm64-v8a using ${CLANG_ARM64}..."
+"${CLANG_ARM64}" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
     -o "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/libciadpi.so"
 
 # armeabi-v7a
-echo " -> Compiling ciadpi for armeabi-v7a..."
-"${TOOLCHAIN}/armv7a-linux-androideabi35-clang" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
+echo " -> Compiling ciadpi for armeabi-v7a using ${CLANG_ARM32}..."
+"${CLANG_ARM32}" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
     -o "${ANDROID_DIR}/app/src/main/jniLibs/armeabi-v7a/libciadpi.so"
 
 # x86_64
-echo " -> Compiling ciadpi for x86_64..."
-"${TOOLCHAIN}/x86_64-linux-android35-clang" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
+echo " -> Compiling ciadpi for x86_64 using ${CLANG_X86_64}..."
+"${CLANG_X86_64}" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
     -o "${ANDROID_DIR}/app/src/main/jniLibs/x86_64/libciadpi.so"
 
 # x86
-echo " -> Compiling ciadpi for x86..."
-"${TOOLCHAIN}/i686-linux-android35-clang" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
+echo " -> Compiling ciadpi for x86 using ${CLANG_X86}..."
+"${CLANG_X86}" -O2 -Wall -D_GNU_SOURCE "${C_SOURCES[@]}" \
     -o "${ANDROID_DIR}/app/src/main/jniLibs/x86/libciadpi.so"
 
 # Copy hev-socks5-tunnel shared libraries

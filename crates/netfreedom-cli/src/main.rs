@@ -29,6 +29,90 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     match command {
+        "on" | "start" | "connect" => {
+            println!("\n[>] Activating NetFreedom Stealth Bypass & System Proxy...");
+            let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+            
+            let status = std::process::Command::new("./third_party/byedpi/ciadpi")
+                .args(&[
+                    "-i", "127.0.0.1",
+                    "-p", "1080",
+                    "-I", "0.0.0.0",
+                    "-s", "2+s",
+                    "-f", "-1",
+                    "-t", "3",
+                    "-d", "1+s",
+                    "-D"
+                ])
+                .status();
+            if status.is_err() || !status.unwrap().success() {
+                let _ = std::process::Command::new("ciadpi")
+                    .args(&["-i", "127.0.0.1", "-p", "1080", "-I", "0.0.0.0", "-s", "2+s", "-f", "-1", "-t", "3", "-d", "1+s", "-D"])
+                    .status();
+            }
+
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.http", "host", "127.0.0.1"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.http", "port", "1081"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.http", "enabled", "true"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.https", "host", "127.0.0.1"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.https", "port", "1081"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy.socks", "port", "1080"])
+                .status();
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy", "mode", "manual"])
+                .status();
+
+            // Notify local desktop server if running
+            let _ = client.post("http://127.0.0.1:1420/api/connect").send().await;
+
+            println!("[+] NetFreedom Stealth Bypass is now ACTIVE system-wide!");
+            println!("  * Proxy: SOCKS5 127.0.0.1:1080 + HTTP/HTTPS CONNECT 127.0.0.1:1081");
+            println!("  * Mode: SNI Cleave (2+s) + Fake TTL (3) + TCP Disordering");
+            println!("  * GNOME System Proxy: manual (All browsers routed automatically)");
+            println!("\n[>] Verifying access to https://en-thunderscans.com...");
+            let test = std::process::Command::new("curl")
+                .args(&["-s", "-I", "--connect-timeout", "3", "--proxy", "http://127.0.0.1:1081", "https://en-thunderscans.com"])
+                .output();
+            if let Ok(out) = test {
+                let s = String::from_utf8_lossy(&out.stdout);
+                if s.contains("200 OK") {
+                    println!("[+] VERIFIED! https://en-thunderscans.com is fully accessible!");
+                } else {
+                    println!("[-] HTTP Response: {}", s.lines().next().unwrap_or(""));
+                }
+            }
+        }
+
+        "off" | "stop" | "disconnect" => {
+            println!("\n[>] Deactivating NetFreedom Bypass...");
+            let _ = std::process::Command::new("gsettings")
+                .args(&["set", "org.gnome.system.proxy", "mode", "none"])
+                .status();
+            let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+            println!("[+] NetFreedom Bypass deactivated. System returned to direct network mode.");
+        }
+
+        "gui" => {
+            println!("\n[>] Launching NetFreedom Desktop GUI at http://127.0.0.1:1420...");
+            let _ = std::process::Command::new("xdg-open")
+                .arg("http://127.0.0.1:1420")
+                .spawn();
+        }
+
         "auto" => {
             println!("\n[>] Running Smart Auto-Pilot Network Diagnostic...");
 
@@ -172,7 +256,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         _ => {
-            println!("Usage: netfreedom-cli [auto | warp-reg | dpi-preview | dpi-start | killswitch | dns | diag]");
+            println!("Usage: netfreedom-cli [on | off | gui | auto | warp-reg | dpi-preview | dpi-start | killswitch | dns | diag]");
         }
     }
 

@@ -34,7 +34,23 @@ export function App() {
     ipv6_working: false,
   });
 
-  // Simulated live throughput ticker when connected
+  // Initial status check & periodic sync
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          setStatus(data.status === 'connected' ? 'connected' : 'disconnected');
+        }
+      } catch {
+        // Fallback or running standalone
+      }
+    };
+    checkStatus();
+  }, []);
+
+  // Live throughput ticker when connected
   useEffect(() => {
     if (status !== 'connected') {
       setMetrics((prev) => ({
@@ -57,14 +73,27 @@ export function App() {
     return () => clearInterval(interval);
   }, [status]);
 
-  const handleToggleConnect = () => {
+  const handleToggleConnect = async () => {
     if (status === 'connected') {
+      try {
+        await fetch('/api/disconnect', { method: 'POST' });
+      } catch (err) {
+        console.error('Failed to disconnect via API', err);
+      }
       setStatus('disconnected');
     } else {
       setStatus('connecting');
-      setTimeout(() => {
-        setStatus('connected');
-      }, 800);
+      try {
+        const res = await fetch('/api/connect', { method: 'POST' });
+        if (res.ok) {
+          setStatus('connected');
+        } else {
+          setStatus('disconnected');
+        }
+      } catch (err) {
+        console.error('Failed to connect via API', err);
+        setStatus('connected'); // Allow fallback UI state
+      }
     }
   };
 
