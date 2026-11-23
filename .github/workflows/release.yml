@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -25,22 +31,26 @@ jobs:
 
       - name: Package Linux Archive
         run: |
-          mkdir -p dist/netfreedom-linux-x86_64
-          cp target/release/netfreedom dist/netfreedom-linux-x86_64/
-          cp target/release/netfreedom-daemon dist/netfreedom-linux-x86_64/
-          cp scripts/netfreedom-daemon.service dist/netfreedom-linux-x86_64/
-          cp scripts/org.netfreedom.policy dist/netfreedom-linux-x86_64/
-          cp scripts/install-linux.sh dist/netfreedom-linux-x86_64/
-          tar -czvf dist/netfreedom-linux-x86_64.tar.gz -C dist netfreedom-linux-x86_64
+          TAG="${{ github.ref_name || inputs.version_tag }}"
+          ARCHIVE_DIR="netfreedom-${TAG}-linux-x86_64"
+          mkdir -p "dist/${ARCHIVE_DIR}"
+          cp target/release/netfreedom "dist/${ARCHIVE_DIR}/"
+          cp target/release/netfreedom-daemon "dist/${ARCHIVE_DIR}/"
+          cp scripts/netfreedom-daemon.service "dist/${ARCHIVE_DIR}/"
+          cp scripts/org.netfreedom.policy "dist/${ARCHIVE_DIR}/"
+          cp scripts/install-linux.sh "dist/${ARCHIVE_DIR}/"
+          cd dist
+          tar -czvf "${ARCHIVE_DIR}.tar.gz" "${ARCHIVE_DIR}"
+          sha256sum "${ARCHIVE_DIR}.tar.gz" > "${ARCHIVE_DIR}.tar.gz.sha256"
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
           name: netfreedom-linux-x86_64
-          path: dist/netfreedom-linux-x86_64.tar.gz
+          path: dist/*.tar.gz*
 
   build-release-android:
-    name: Build Android APK
+    name: Build Android APKs (Universal & ABI Splits)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,56 +64,100 @@ jobs:
           java-version: 17
 
       - name: Setup Android SDK & NDK
+        id: setup-android
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
+      - name: Install NDK & CMake
         run: sdkmanager --install "ndk;28.2.13676358" "cmake;3.22.1"
 
-      - name: Build Android Native Libraries
+      - name: Build Android Native Libraries for all 4 ABIs
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-android.outputs.sdk-path }}/ndk/28.2.13676358
         run: ./scripts/build-android-libs.sh
 
-      - name: Build Release/Debug APK
+      - name: Build Universal and Split APKs
         working-directory: apps/android
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Copy Output APK
+      - name: Stage & Rename All APK Variants
         run: |
-          mkdir -p dist
-          cp apps/android/app/build/outputs/apk/debug/app-debug.apk dist/NetFreedom-v1.0.0.apk
+          TAG="${{ github.ref_name || inputs.version_tag }}"
+          mkdir -p dist/apks
+          APK_DIR="apps/android/app/build/outputs/apk/debug"
 
-      - name: Upload Android Artifact
+          # Universal Fat APK (contains all 4 architectures)
+          cp "${APK_DIR}/app-universal-debug.apk" "dist/apks/NetFreedom-${TAG}-universal.apk"
+
+          # Architecture Splits (lightweight standalone APKs)
+          cp "${APK_DIR}/app-arm64-v8a-debug.apk" "dist/apks/NetFreedom-${TAG}-arm64-v8a.apk"
+          cp "${APK_DIR}/app-armeabi-v7a-debug.apk" "dist/apks/NetFreedom-${TAG}-armeabi-v7a.apk"
+          cp "${APK_DIR}/app-x86_64-debug.apk" "dist/apks/NetFreedom-${TAG}-x86_64.apk"
+          cp "${APK_DIR}/app-x86-debug.apk" "dist/apks/NetFreedom-${TAG}-x86.apk"
+
+          # Calculate SHA-256 Checksums
+          cd dist/apks
+          sha256sum NetFreedom-*.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload Android Release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: NetFreedom-Android-APK
-          path: dist/NetFreedom-v1.0.0.apk
+          name: NetFreedom-Android-Release-APKs
+          path: dist/apks/
 
   publish-release:
-    name: Publish GitHub Release
+    name: Publish Multi-Platform GitHub Release
     needs: [build-release-linux, build-release-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Linux Artifact
+      - name: Download Linux Artifacts
         uses: actions/download-artifact@v4
         with:
           name: netfreedom-linux-x86_64
-          path: dist/
+          path: release-assets/
 
-      - name: Download Android Artifact
+      - name: Download Android Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: NetFreedom-Android-APK
-          path: dist/
+          name: NetFreedom-Android-Release-APKs
+          path: release-assets/
 
-      - name: Create GitHub Release
+      - name: Generate Master Release Checksums
+        run: |
+          cd release-assets/
+          sha256sum * > RELEASE_SHA256SUMS.txt || true
+          ls -lh
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name || inputs.version_tag }}
+          name: "NetFreedom ${{ github.ref_name || inputs.version_tag }}"
+          body: |
+            ## NetFreedom Release ${{ github.ref_name || inputs.version_tag }}
+            
+            Multi-mode network privacy, security, and censorship circumvention platform for Linux, Windows, and Android.
+            
+            ### Android APK Variants
+            
+            | Variant | Architecture / Target | Description |
+            |---|---|---|
+            | **`NetFreedom-*-universal.apk`** | All ABIs (Universal Fat APK) | Recommended for most users. Contains `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`. Works on any Android device. |
+            | **`NetFreedom-*-arm64-v8a.apk`** | 64-bit ARM | Leanest APK for modern Android smartphones & tablets (2016+). |
+            | **`NetFreedom-*-armeabi-v7a.apk`** | 32-bit ARM | Optimized for older 32-bit Android devices and wearables. |
+            | **`NetFreedom-*-x86_64.apk`** | 64-bit x86 | Optimized for ChromeOS, Android emulators, and Intel-based tablets. |
+            | **`NetFreedom-*-x86.apk`** | 32-bit x86 | Optimized for legacy 32-bit x86 emulators. |
+            
+            ### Linux Release
+            
+            - **`netfreedom-*-linux-x86_64.tar.gz`**: Includes `netfreedom` CLI, `netfreedom-daemon`, systemd service, Polkit policy, and `install-linux.sh`.
+            
+            ---
+            *Verify all downloads using `RELEASE_SHA256SUMS.txt`.*
           files: |
-            dist/netfreedom-linux-x86_64.tar.gz
-            dist/NetFreedom-v1.0.0.apk
+            release-assets/*
           draft: false
           prerelease: false
           generate_release_notes: true

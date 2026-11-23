@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -64,7 +65,7 @@ jobs:
         run: npm run build
 
   android-app:
-    name: Android App Build (Kotlin/Compose/NDK)
+    name: Android Multi-ABI Build (Universal & Splits)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,22 +79,70 @@ jobs:
           java-version: 17
 
       - name: Setup Android SDK & NDK
+        id: setup-android
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
+      - name: Install NDK & CMake
         run: sdkmanager --install "ndk;28.2.13676358" "cmake;3.22.1"
 
-      - name: Build Android Native Libraries
+      - name: Build Native Libraries for all 4 ABIs (arm64-v8a, armeabi-v7a, x86_64, x86)
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-android.outputs.sdk-path }}/ndk/28.2.13676358
         run: ./scripts/build-android-libs.sh
 
-      - name: Build Debug APK
+      - name: Build Universal and Split APKs
         working-directory: apps/android
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Upload Debug APK Artifact
+      - name: Stage & Verify Generated APKs
+        run: |
+          mkdir -p artifacts/apk
+          APK_DIR="apps/android/app/build/outputs/apk/debug"
+
+          # Copy and rename for clear identification
+          cp "${APK_DIR}/app-universal-debug.apk" artifacts/apk/NetFreedom-universal-debug.apk
+          cp "${APK_DIR}/app-arm64-v8a-debug.apk" artifacts/apk/NetFreedom-arm64-v8a-debug.apk
+          cp "${APK_DIR}/app-armeabi-v7a-debug.apk" artifacts/apk/NetFreedom-armeabi-v7a-debug.apk
+          cp "${APK_DIR}/app-x86_64-debug.apk" artifacts/apk/NetFreedom-x86_64-debug.apk
+          cp "${APK_DIR}/app-x86-debug.apk" artifacts/apk/NetFreedom-x86-debug.apk
+
+          # Generate Checksums
+          cd artifacts/apk
+          sha256sum NetFreedom-*.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload Universal Fat APK
         uses: actions/upload-artifact@v4
         with:
-          name: netfreedom-android-debug
-          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          name: NetFreedom-Android-Universal-Fat-APK
+          path: artifacts/apk/NetFreedom-universal-debug.apk
+
+      - name: Upload ARM64-v8a Split APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-Android-arm64-v8a-APK
+          path: artifacts/apk/NetFreedom-arm64-v8a-debug.apk
+
+      - name: Upload ARMeabi-v7a Split APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-Android-armeabi-v7a-APK
+          path: artifacts/apk/NetFreedom-armeabi-v7a-debug.apk
+
+      - name: Upload x86_64 Split APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-Android-x86_64-APK
+          path: artifacts/apk/NetFreedom-x86_64-debug.apk
+
+      - name: Upload x86 Split APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-Android-x86-APK
+          path: artifacts/apk/NetFreedom-x86-debug.apk
+
+      - name: Upload Complete Android Release Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-Android-All-APKs-Bundle
+          path: artifacts/apk/
