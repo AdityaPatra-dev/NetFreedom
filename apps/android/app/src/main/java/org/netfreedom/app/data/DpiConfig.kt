@@ -15,6 +15,8 @@ data class DpiConfig(
         args.add(listenIp)
         args.add("-p")
         args.add(listenPort.toString())
+        args.add("-I")
+        args.add("0.0.0.0")
 
         if (splitPos.isNotEmpty()) {
             args.add("-s")

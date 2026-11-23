@@ -108,7 +108,7 @@ class NetFreedomVpnService : VpnService() {
                     val args = profile.dpiConfig.toCliArgs()
                     val dpiStarted = NetFreedomNative.startByeDpi(applicationContext, args)
                     if (!dpiStarted) {
-                        Log.w(TAG, "ByeDPI process failed to start, falling back to direct tunnel")
+                        throw IOException("ByeDPI engine failed to start on this architecture")
                     }
                 }
 
@@ -121,7 +121,13 @@ class NetFreedomVpnService : VpnService() {
                     .setMtu(1420)
                     .setBlocking(false)
 
-                // Protect local sockets / prevent loop
+                // Disallow NetFreedom app from own VPN to avoid black-hole routing loop
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not disallow own package: ${e.message}")
+                }
+
                 val pfd = builder.establish()
                 if (pfd == null) {
                     throw IOException("VpnService.Builder.establish() returned null")

@@ -18,8 +18,38 @@ object NetFreedomNative {
     fun startByeDpi(context: Context, args: List<String>): Boolean {
         stopByeDpi()
         try {
-            val nativeDir = context.applicationInfo.nativeLibraryDir
-            val binary = File(nativeDir, "libciadpi.so")
+            var binary = File(context.applicationInfo.nativeLibraryDir, "libciadpi.so")
+            if (!binary.exists() || !binary.canExecute()) {
+                Log.w(TAG, "libciadpi.so not executable in nativeLibraryDir. Extracting from APK...")
+                val extracted = File(context.filesDir, "libciadpi.so")
+                if (!extracted.exists() || extracted.length() == 0L) {
+                    val apkFile = File(context.applicationInfo.sourceDir)
+                    java.util.zip.ZipFile(apkFile).use { zip ->
+                        val supportedAbis = android.os.Build.SUPPORTED_ABIS
+                        var entry: java.util.zip.ZipEntry? = null
+                        for (abi in supportedAbis) {
+                            entry = zip.getEntry("lib/$abi/libciadpi.so")
+                            if (entry != null) break
+                        }
+                        if (entry != null) {
+                            zip.getInputStream(entry).use { input ->
+                                FileOutputStream(extracted).use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            extracted.setExecutable(true, false)
+                            Log.i(TAG, "Extracted libciadpi.so (${extracted.length()} bytes)")
+                        } else {
+                            Log.e(TAG, "Could not find libciadpi.so in APK")
+                        }
+                    }
+                }
+                if (extracted.exists() && extracted.length() > 0) {
+                    extracted.setExecutable(true, false)
+                    binary = extracted
+                }
+            }
+
             if (!binary.exists() || !binary.canExecute()) {
                 Log.e(TAG, "libciadpi.so not found or not executable at: ${binary.absolutePath}")
                 return false
@@ -95,7 +125,7 @@ object NetFreedomNative {
             socks5:
               port: $socksPort
               address: '$socksHost'
-              udp: 'tcp'
+              udp: 'udp'
             
             misc:
               limit-nofile: 4096
