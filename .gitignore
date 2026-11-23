@@ -8,3 +8,7 @@
 *.so
 *.exe
 /third_party/byedpi/ciadpi
+node_modules/
+dist/
+.env.local
+
