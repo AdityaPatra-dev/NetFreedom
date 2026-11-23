@@ -1,0 +1,12 @@
+[package]
+name = "netfreedom-dpi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+netfreedom-common = { path = "../netfreedom-common" }
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
