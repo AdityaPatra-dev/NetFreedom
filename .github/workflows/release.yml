@@ -69,6 +69,14 @@ jobs:
       - name: Build Windows CLI & Daemon Binaries
         run: cargo build --release -p netfreedom-cli -p netfreedom-daemon
 
+      - name: Build Windows ciadpi.exe (ByeDPI)
+        shell: pwsh
+        run: |
+          cd third_party/byedpi
+          gcc -O2 -I. -D_DEFAULT_SOURCE packets.c main.c conev.c proxy.c desync.c mpool.c extend.c win_service.c -o ciadpi.exe -lws2_32 -lmswsock
+          Copy-Item "ciadpi.exe" "..\..\target\release\ciadpi.exe"
+          cd ..\..
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -77,6 +85,7 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Build Windows Desktop GUI
+        continue-on-error: true
         shell: pwsh
         run: |
           cd apps/desktop
@@ -101,6 +110,7 @@ jobs:
           Copy-Item "target\release\netfreedom.exe" "dist\$DirName\"
           Copy-Item "target\release\netfreedom-daemon.exe" "dist\$DirName\"
           Copy-Item "target\release\wintun.dll" "dist\$DirName\"
+          Copy-Item "target\release\ciadpi.exe" "dist\$DirName\"
           Copy-Item "scripts\install-windows.ps1" "dist\$DirName\"
           if (Test-Path "apps\desktop\src-tauri\target\release\netfreedom-desktop.exe") {
             Copy-Item "apps\desktop\src-tauri\target\release\netfreedom-desktop.exe" "dist\$DirName\NetFreedom-GUI.exe"

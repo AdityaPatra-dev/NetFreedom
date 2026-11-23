@@ -96,7 +96,6 @@ async fn main() -> anyhow::Result<()> {
                         "-f", "-1",
                         "-t", "3",
                         "-d", "1+s",
-                        "-D"
                     ])
                     .spawn();
 
