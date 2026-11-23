@@ -1,4 +1,4 @@
-# NetFreedom (网络自由)
+# NetFreedom
 
 <div align="center">
 
