@@ -6,13 +6,13 @@ edition = "2021"
 [workspace]
 
 [build-dependencies]
-tauri-build = { version = "2.0", default-features = false }
+tauri-build = { version = "2.0" }
 
 [dependencies]
 netfreedom-common = { path = "../../../crates/netfreedom-common" }
 netfreedom-daemon = { path = "../../../crates/netfreedom-daemon" }
 netfreedom-health = { path = "../../../crates/netfreedom-health" }
-tauri = { version = "2.0", default-features = false }
+tauri = { version = "2.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.43", features = ["full"] }

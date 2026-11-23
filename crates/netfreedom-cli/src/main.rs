@@ -31,50 +31,102 @@ async fn main() -> anyhow::Result<()> {
     match command {
         "on" | "start" | "connect" => {
             println!("\n[>] Activating NetFreedom Stealth Bypass & System Proxy...");
-            let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
-            
-            let status = std::process::Command::new("./third_party/byedpi/ciadpi")
-                .args(&[
-                    "-i", "127.0.0.1",
-                    "-p", "1080",
-                    "-I", "0.0.0.0",
-                    "-s", "2+s",
-                    "-f", "-1",
-                    "-t", "3",
-                    "-d", "1+s",
-                    "-D"
-                ])
-                .status();
-            if status.is_err() || !status.unwrap().success() {
-                let _ = std::process::Command::new("ciadpi")
-                    .args(&["-i", "127.0.0.1", "-p", "1080", "-I", "0.0.0.0", "-s", "2+s", "-f", "-1", "-t", "3", "-d", "1+s", "-D"])
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+                
+                let status = std::process::Command::new("./third_party/byedpi/ciadpi")
+                    .args(&[
+                        "-i", "127.0.0.1",
+                        "-p", "1080",
+                        "-I", "0.0.0.0",
+                        "-s", "2+s",
+                        "-f", "-1",
+                        "-t", "3",
+                        "-d", "1+s",
+                        "-D"
+                    ])
+                    .status();
+                if status.is_err() || !status.unwrap().success() {
+                    let _ = std::process::Command::new("ciadpi")
+                        .args(&["-i", "127.0.0.1", "-p", "1080", "-I", "0.0.0.0", "-s", "2+s", "-f", "-1", "-t", "3", "-d", "1+s", "-D"])
+                        .status();
+                }
+
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.http", "host", "127.0.0.1"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.http", "port", "1081"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.http", "enabled", "true"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.https", "host", "127.0.0.1"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.https", "port", "1081"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy.socks", "port", "1080"])
+                    .status();
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy", "mode", "manual"])
                     .status();
             }
 
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.http", "host", "127.0.0.1"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.http", "port", "1081"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.http", "enabled", "true"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.https", "host", "127.0.0.1"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.https", "port", "1081"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy.socks", "port", "1080"])
-                .status();
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy", "mode", "manual"])
-                .status();
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
+                let ciadpi_bin = if std::path::Path::new("ciadpi.exe").exists() {
+                    "ciadpi.exe"
+                } else {
+                    "third_party\\byedpi\\ciadpi.exe"
+                };
+                let _ = std::process::Command::new(ciadpi_bin)
+                    .args(&[
+                        "-i", "127.0.0.1",
+                        "-p", "1080",
+                        "-I", "0.0.0.0",
+                        "-s", "2+s",
+                        "-f", "-1",
+                        "-t", "3",
+                        "-d", "1+s",
+                        "-D"
+                    ])
+                    .spawn();
+
+                let _ = std::process::Command::new("reg")
+                    .args(&[
+                        "add",
+                        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                        "/v",
+                        "ProxyEnable",
+                        "/t",
+                        "REG_DWORD",
+                        "/d",
+                        "1",
+                        "/f",
+                    ])
+                    .status();
+                let _ = std::process::Command::new("reg")
+                    .args(&[
+                        "add",
+                        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                        "/v",
+                        "ProxyServer",
+                        "/t",
+                        "REG_SZ",
+                        "/d",
+                        "socks=127.0.0.1:1080",
+                        "/f",
+                    ])
+                    .status();
+            }
 
             // Notify local desktop server if running
             let _ = client.post("http://127.0.0.1:1420/api/connect").send().await;
@@ -99,10 +151,32 @@ async fn main() -> anyhow::Result<()> {
 
         "off" | "stop" | "disconnect" => {
             println!("\n[>] Deactivating NetFreedom Bypass...");
-            let _ = std::process::Command::new("gsettings")
-                .args(&["set", "org.gnome.system.proxy", "mode", "none"])
-                .status();
-            let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("gsettings")
+                    .args(&["set", "org.gnome.system.proxy", "mode", "none"])
+                    .status();
+                let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("reg")
+                    .args(&[
+                        "add",
+                        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+                        "/v",
+                        "ProxyEnable",
+                        "/t",
+                        "REG_DWORD",
+                        "/d",
+                        "0",
+                        "/f",
+                    ])
+                    .status();
+                let _ = std::process::Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
+            }
+
             println!("[+] NetFreedom Bypass deactivated. System returned to direct network mode.");
         }
 
@@ -261,5 +335,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     println!("\n============================================================");
+
+    #[cfg(target_os = "windows")]
+    {
+        println!("\nPress Enter to exit...");
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+    }
+
     Ok(())
 }
