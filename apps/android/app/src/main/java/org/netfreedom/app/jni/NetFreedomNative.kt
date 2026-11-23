@@ -127,6 +127,13 @@ object NetFreedomNative {
               address: '$socksHost'
               udp: 'udp'
             
+            mapdns:
+              address: 198.18.0.2
+              port: 53
+              network: 100.64.0.0
+              netmask: 255.192.0.0
+              cache-size: 10000
+
             misc:
               limit-nofile: 4096
         """.trimIndent()

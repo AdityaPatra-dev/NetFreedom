@@ -117,7 +117,7 @@ class NetFreedomVpnService : VpnService() {
                     .setSession("NetFreedom - ${mode.label}")
                     .addAddress("172.16.0.2", 32)
                     .addRoute("0.0.0.0", 0)
-                    .addDnsServer("1.1.1.1")
+                    .addDnsServer("198.18.0.2")
                     .setMtu(1420)
                     .setBlocking(false)
 
@@ -135,10 +135,34 @@ class NetFreedomVpnService : VpnService() {
                 vpnInterface = pfd
 
                 // 3. Generate hev-socks5-tunnel config
+                val isEmulator = Build.FINGERPRINT.startsWith("generic")
+                    || Build.FINGERPRINT.startsWith("unknown")
+                    || Build.MODEL.contains("google_sdk")
+                    || Build.MODEL.contains("Emulator")
+                    || Build.MODEL.contains("Android SDK built for x86")
+                    || Build.HARDWARE.contains("goldfish")
+                    || Build.HARDWARE.contains("ranchu")
+
+                var socksHost = "127.0.0.1"
+                if (isEmulator && isDpiNeeded) {
+                    // In QEMU emulator, guest IP_TTL is stripped by user-mode slirp, causing fake packet
+                    // to reach Cloudflare / target servers directly and trigger TLS decode error (562).
+                    // If host ByeDPI proxy is running on 10.0.2.2:1080, route through it to preserve raw TTL desync.
+                    try {
+                        java.net.Socket().use { s ->
+                            s.connect(java.net.InetSocketAddress("10.0.2.2", 1080), 600)
+                            socksHost = "10.0.2.2"
+                            Log.i(TAG, "Android Emulator detected: bridging to host ByeDPI engine at 10.0.2.2:1080")
+                        }
+                    } catch (e: Exception) {
+                        Log.i(TAG, "Android Emulator: host 10.0.2.2:1080 unreachable, using local daemon at 127.0.0.1")
+                    }
+                }
+
                 val socksPort = if (isDpiNeeded) 1080 else 1080
                 val configFile = NetFreedomNative.createHevConfig(
                     cacheDir = cacheDir,
-                    socksHost = "127.0.0.1",
+                    socksHost = socksHost,
                     socksPort = socksPort,
                     mtu = 1420
                 )
