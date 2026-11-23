@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+*.swp
+*.bak
+.DS_Store
+*.o
+*.a
+*.so
+*.exe
+/third_party/byedpi/ciadpi
