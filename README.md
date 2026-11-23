@@ -163,6 +163,25 @@ cd apps/android
 # - app-x86-debug.apk         (Optimized 32-bit x86 APK)
 ```
 
+### 6.4. Windows Installation
+
+```powershell
+# 1. Download release bundle (netfreedom-*-windows-x86_64.zip)
+# 2. Open PowerShell as Administrator and run:
+.\scripts\install-windows.ps1
+
+# 3. Test status or run Auto-Pilot
+netfreedom auto
+```
+
+### 6.5. Apple (iOS & macOS) Frameworks
+
+```bash
+# Compile HevSocks5Tunnel.xcframework and universal ByeDPI on macOS
+./scripts/build-apple-frameworks.sh
+# Staged into: dist/apple/NetFreedom-Apple-HevSocks5Tunnel.xcframework.zip
+```
+
 ---
 
 ## 7. Testing & Verification
