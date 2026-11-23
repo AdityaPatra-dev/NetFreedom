@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 netfreedom-common = { path = "../netfreedom-common" }
+serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
