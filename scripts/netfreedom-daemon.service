@@ -1,0 +1,25 @@
+[Unit]
+Description=NetFreedom Network Privacy & Anti-Censorship Daemon
+Documentation=https://github.com/AdityaPatra-dev/NetFreedom
+After=network.target network-online.target systemd-resolved.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/netfreedom-daemon
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+# Linux Capabilities for TUN/TAP, Routing, and Firewall Management
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+# Sandboxing
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run /var/run /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
