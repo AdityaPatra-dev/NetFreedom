@@ -808,8 +808,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "netfreedom-common",
+ "netfreedom-daemon",
+ "netfreedom-dns",
  "netfreedom-dpi",
  "netfreedom-health",
+ "netfreedom-security",
  "netfreedom-tun",
  "netfreedom-vpn",
  "reqwest",
@@ -830,6 +833,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "netfreedom-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "netfreedom-common",
+ "netfreedom-dns",
+ "netfreedom-dpi",
+ "netfreedom-health",
+ "netfreedom-security",
+ "netfreedom-tun",
+ "netfreedom-vpn",
+ "reqwest",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "netfreedom-dns"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "netfreedom-common",
+ "reqwest",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "netfreedom-dpi"
 version = "0.1.0"
 dependencies = [
@@ -847,6 +880,17 @@ dependencies = [
  "netfreedom-common",
  "reqwest",
  "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "netfreedom-security"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "netfreedom-common",
+ "thiserror",
  "tokio",
  "tracing",
 ]

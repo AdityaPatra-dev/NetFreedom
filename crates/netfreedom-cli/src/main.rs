@@ -2,9 +2,11 @@ use netfreedom_common::DpiConfig;
 use netfreedom_health::{
     check_egress_info, detect_captive_portal, is_ipv6_functional, probe_latency_and_jitter,
 };
+use netfreedom_security::{generate_nftables_ruleset, is_killswitch_active};
 use netfreedom_vpn::register_warp_account;
 use std::env;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[tokio::main]
@@ -29,8 +31,8 @@ async fn main() -> anyhow::Result<()> {
     match command {
         "auto" => {
             println!("\n[>] Running Smart Auto-Pilot Network Diagnostic...");
-            
-            // 1. Probe non-ICMP TCP Handshake Latency to Cloudflare Edge (1.1.1.1:443)
+
+            // 1. Probe non-ICMP TCP Handshake Latency
             let cf_target: SocketAddr = "1.1.1.1:443".parse()?;
             print!("  [*] Probing TCP Handshake Latency (non-ICMP)... ");
             let (latency, jitter) = probe_latency_and_jitter(cf_target, 3).await;
@@ -113,6 +115,45 @@ async fn main() -> anyhow::Result<()> {
             println!("    ciadpi {}", supervisor.build_arguments().join(" "));
         }
 
+        "dpi-start" => {
+            let config = DpiConfig::default();
+            let ciadpi_path = PathBuf::from("./third_party/byedpi/ciadpi");
+            println!("\n[>] Starting ByeDPI Desynchronization Supervisor...");
+            let mut supervisor = netfreedom_dpi::DpiSupervisor::new(config.clone(), ciadpi_path);
+            supervisor.start().await?;
+            println!("[+] ByeDPI running on 127.0.0.1:{} (Press Ctrl+C to stop)", config.local_port);
+            
+            tokio::signal::ctrl_c().await?;
+            supervisor.stop().await?;
+            println!("[+] ByeDPI stopped cleanly.");
+        }
+
+        "killswitch" => {
+            let action = args.get(2).map(|s| s.as_str()).unwrap_or("status");
+            match action {
+                "status" => {
+                    println!("\n[>] Checking Kernel nftables Kill Switch Status...");
+                    let active = is_killswitch_active();
+                    println!("  Kill Switch Active: {}", active);
+                }
+                "preview" => {
+                    println!("\n[>] Previewing Kernel nftables Kill Switch Ruleset:");
+                    let dummy_ep: SocketAddr = "162.159.192.1:2408".parse()?;
+                    let rules = generate_nftables_ruleset("netfreedom0", Some(dummy_ep), true, Some("10.6.80.0/20"));
+                    println!("{}", rules);
+                }
+                _ => {
+                    println!("Usage: netfreedom-cli killswitch [status | preview]");
+                }
+            }
+        }
+
+        "dns" => {
+            println!("\n[>] Testing Encrypted DNS Resolver Verification...");
+            let secure = netfreedom_dns::verify_secure_dns(&client).await?;
+            println!("  Encrypted DNS Active (DoH/WARP): {}", secure);
+        }
+
         "diag" => {
             println!("\n[>] Running Full Network Diagnostics Report...");
             let target: SocketAddr = "1.1.1.1:443".parse()?;
@@ -121,15 +162,17 @@ async fn main() -> anyhow::Result<()> {
             println!("  Jitter:                {:.2?} ms", jit);
             println!("  Functional IPv6:       {}", is_ipv6_functional().await);
             println!("  Captive Portal:        {}", detect_captive_portal(&client).await);
+            println!("  Kill Switch Active:    {}", is_killswitch_active());
             if let Ok(egress) = check_egress_info(&client).await {
                 println!("  Public IP:             {:?}", egress.ip);
                 println!("  Country:               {:?}", egress.loc);
                 println!("  Datacenter (Colo):     {:?}", egress.colo);
+                println!("  WARP Active:           {}", egress.warp_active);
             }
         }
 
         _ => {
-            println!("Usage: netfreedom-cli [auto | warp-reg | dpi-preview | diag]");
+            println!("Usage: netfreedom-cli [auto | warp-reg | dpi-preview | dpi-start | killswitch | dns | diag]");
         }
     }
 

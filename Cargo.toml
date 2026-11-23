@@ -5,6 +5,9 @@ members = [
     "crates/netfreedom-vpn",
     "crates/netfreedom-dpi",
     "crates/netfreedom-tun",
+    "crates/netfreedom-security",
+    "crates/netfreedom-dns",
+    "crates/netfreedom-daemon",
     "crates/netfreedom-cli",
 ]
 resolver = "2"
