@@ -1,4 +1,4 @@
-name: NetFreedom Continuous Integration
+name: NetFreedom Multi-Platform Continuous Integration
 
 on:
   push:
@@ -12,13 +12,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # --------------------------------------------------------------------------
+  # 1. Rust Core Workspace (Linux, Windows, macOS)
+  # --------------------------------------------------------------------------
   rust-core:
     name: Rust Core Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,10 +42,13 @@ jobs:
       - name: Run Cargo Workspace Tests
         run: cargo test --workspace --all-targets
 
-      - name: Run Fail-Safe Leak & Killswitch Verification
+      - name: Run Fail-Safe Leak & Killswitch Verification (Linux)
         if: runner.os == 'Linux'
         run: ./scripts/test-leak-switch.sh
 
+  # --------------------------------------------------------------------------
+  # 2. Desktop Frontend (React / TypeScript / Vite)
+  # --------------------------------------------------------------------------
   desktop-frontend:
     name: Desktop UI Build (React/TypeScript/Vite)
     runs-on: ubuntu-latest
@@ -64,8 +70,11 @@ jobs:
         working-directory: apps/desktop
         run: npm run build
 
-  android-app:
-    name: Android Multi-ABI Build (Universal & Splits)
+  # --------------------------------------------------------------------------
+  # 3. Android Multi-ABI Build (Universal & Splits)
+  # --------------------------------------------------------------------------
+  android-multi-abi:
+    name: Android Build (Universal Fat APK & 4 ABI Splits)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +94,7 @@ jobs:
       - name: Install NDK & CMake
         run: sdkmanager --install "ndk;28.2.13676358" "cmake;3.22.1"
 
-      - name: Build Native Libraries for all 4 ABIs (arm64-v8a, armeabi-v7a, x86_64, x86)
+      - name: Build Native Libraries (arm64-v8a, armeabi-v7a, x86_64, x86)
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-android.outputs.sdk-path }}/ndk/28.2.13676358
         run: ./scripts/build-android-libs.sh
@@ -99,14 +108,12 @@ jobs:
           mkdir -p artifacts/apk
           APK_DIR="apps/android/app/build/outputs/apk/debug"
 
-          # Copy and rename for clear identification
           cp "${APK_DIR}/app-universal-debug.apk" artifacts/apk/NetFreedom-universal-debug.apk
           cp "${APK_DIR}/app-arm64-v8a-debug.apk" artifacts/apk/NetFreedom-arm64-v8a-debug.apk
           cp "${APK_DIR}/app-armeabi-v7a-debug.apk" artifacts/apk/NetFreedom-armeabi-v7a-debug.apk
           cp "${APK_DIR}/app-x86_64-debug.apk" artifacts/apk/NetFreedom-x86_64-debug.apk
           cp "${APK_DIR}/app-x86-debug.apk" artifacts/apk/NetFreedom-x86-debug.apk
 
-          # Generate Checksums
           cd artifacts/apk
           sha256sum NetFreedom-*.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -141,8 +148,34 @@ jobs:
           name: NetFreedom-Android-x86-APK
           path: artifacts/apk/NetFreedom-x86-debug.apk
 
-      - name: Upload Complete Android Release Bundle
+      - name: Upload Complete Android Bundle
         uses: actions/upload-artifact@v4
         with:
           name: NetFreedom-Android-All-APKs-Bundle
           path: artifacts/apk/
+
+  # --------------------------------------------------------------------------
+  # 4. Apple iOS & macOS Native Verification
+  # --------------------------------------------------------------------------
+  apple-ios-macos:
+    name: Apple Build (iOS XCFramework & macOS Universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Apple Frameworks & ByeDPI
+        run: ./scripts/build-apple-frameworks.sh
+
+      - name: Upload Apple HevSocks5Tunnel XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-Apple-XCFramework
+          path: dist/apple/NetFreedom-Apple-HevSocks5Tunnel.xcframework.zip
+
+      - name: Upload macOS Universal Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetFreedom-macOS-Universal-Binary
+          path: dist/apple/ciadpi-macos-universal
