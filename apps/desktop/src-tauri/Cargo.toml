@@ -1,0 +1,16 @@
+[package]
+name = "netfreedom-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0", default-features = false }
+
+[dependencies]
+netfreedom-common = { path = "../../../crates/netfreedom-common" }
+netfreedom-daemon = { path = "../../../crates/netfreedom-daemon" }
+netfreedom-health = { path = "../../../crates/netfreedom-health" }
+tauri = { version = "2.0", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.43", features = ["full"] }
