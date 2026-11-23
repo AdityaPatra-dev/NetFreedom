@@ -145,17 +145,22 @@ npm run build
 npm run tauri dev
 ```
 
-### 6.3. Android App
+### 6.3. Android App (Universal & Architecture Splits)
 
 ```bash
-# Build native NDK libraries (arm64-v8a & x86_64)
+# 1. Build native NDK libraries across all 4 ABIs (arm64-v8a, armeabi-v7a, x86_64, x86)
 ./scripts/build-android-libs.sh
 
-# Compile Android APK
+# 2. Compile Universal Fat APK and standalone ABI splits
 cd apps/android
 ./gradlew assembleDebug
 
-# Output APK: apps/android/app/build/outputs/apk/debug/app-debug.apk
+# Output APKs in apps/android/app/build/outputs/apk/debug/:
+# - app-universal-debug.apk   (Large universal fat APK for any device)
+# - app-arm64-v8a-debug.apk   (Optimized 64-bit ARM APK)
+# - app-armeabi-v7a-debug.apk (Optimized 32-bit ARM APK)
+# - app-x86_64-debug.apk      (Optimized 64-bit x86 APK)
+# - app-x86-debug.apk         (Optimized 32-bit x86 APK)
 ```
 
 ---
