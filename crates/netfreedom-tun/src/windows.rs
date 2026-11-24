@@ -4,7 +4,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 pub type WintunAdapterHandle = *mut c_void;
 pub type WintunSessionHandle = *mut c_void;
@@ -188,11 +188,12 @@ impl WintunAdapter {
 
         let is_running = self.is_running.clone();
         let api_read = self.api.clone();
-        let session_read = self.session.unwrap();
+        let session_read_addr = self.session.unwrap() as usize;
         let is_running_read = is_running.clone();
 
         // 1. Reader thread (blocking read from Wintun ring -> send to in_tx)
         std::thread::spawn(move || {
+            let session_read = session_read_addr as *mut c_void;
             while is_running_read.load(Ordering::Relaxed) {
                 let mut packet_size: u32 = 0;
                 let packet_ptr = unsafe {
@@ -213,10 +214,11 @@ impl WintunAdapter {
 
         // 2. Writer thread (receive from out_rx -> allocate and send to Wintun ring)
         let api_write = self.api.clone();
-        let session_write = self.session.unwrap();
+        let session_write_addr = self.session.unwrap() as usize;
         let is_running_write = is_running.clone();
 
         std::thread::spawn(move || {
+            let session_write = session_write_addr as *mut c_void;
             while is_running_write.load(Ordering::Relaxed) {
                 if let Some(packet) = out_rx.blocking_recv() {
                     let size = packet.len() as u32;

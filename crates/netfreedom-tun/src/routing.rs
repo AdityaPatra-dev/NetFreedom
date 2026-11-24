@@ -8,7 +8,7 @@ use tracing::{info, warn};
 pub fn apply_double_slash_one_routes(
     tun_interface: &str,
     gateway_ip: &str,
-    physical_dev: &str,
+    _physical_dev: &str,
     remote_endpoint_ip: Option<&str>,
 ) -> Result<()> {
     info!("Configuring safe /1 routes for interface {}", tun_interface);
@@ -18,7 +18,7 @@ pub fn apply_double_slash_one_routes(
         // 1. Explicit /32 route to remote VPN endpoint via original physical gateway
         if let Some(endpoint) = remote_endpoint_ip {
             let status = Command::new("ip")
-                .args(["route", "replace", &format!("{}/32", endpoint), "via", gateway_ip, "dev", physical_dev])
+                .args(["route", "replace", &format!("{}/32", endpoint), "via", gateway_ip, "dev", _physical_dev])
                 .status()?;
             if !status.success() {
                 warn!("Failed to add /32 route for endpoint {}", endpoint);
