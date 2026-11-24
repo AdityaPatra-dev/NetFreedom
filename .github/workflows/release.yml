@@ -110,6 +110,8 @@ jobs:
           Copy-Item "target\release\wintun.dll" "dist\$DirName\"
           Copy-Item "target\release\ciadpi.exe" "dist\$DirName\"
           Copy-Item "scripts\install-windows.ps1" "dist\$DirName\"
+          Copy-Item "scripts\Install.bat" "dist\$DirName\"
+          Copy-Item "scripts\Uninstall.bat" "dist\$DirName\"
 
           # Locate and package NetFreedom-GUI.exe
           $GuiFound = $false
