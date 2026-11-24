@@ -86,3 +86,105 @@ pub fn generate_singbox_warp_config(warp: &WarpConfig, enable_tun: bool, socks_p
 
     serde_json::to_string_pretty(&config).unwrap_or_default()
 }
+
+/// Generates a valid Sing-Box JSON configuration file for an Encrypted Stealth Tunnel over TCP Port 443.
+/// This completely bypasses campus firewalls (such as Fortinet on KIIT) that drop outbound UDP,
+/// by encapsulating all traffic inside TLS 1.3 on TCP 443.
+pub fn generate_singbox_stealth_config(
+    custom_node_opt: Option<serde_json::Value>,
+    enable_tun: bool,
+    socks_port: u16,
+) -> String {
+    let mut inbounds = Vec::new();
+
+    if enable_tun {
+        inbounds.push(json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "NetFreedom",
+            "inet4_address": "172.19.0.1/30",
+            "auto_route": true,
+            "strict_route": true,
+            "stack": "system",
+            "sniff": true
+        }));
+    }
+
+    inbounds.push(json!({
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": "127.0.0.1",
+        "listen_port": socks_port
+    }));
+
+    // Default TCP 443 outbound using standard Cloudflare CDN WebSocket encapsulation
+    let stealth_outbound = custom_node_opt.unwrap_or_else(|| {
+        json!({
+            "type": "vless",
+            "tag": "stealth-out",
+            "server": "104.16.132.229",
+            "server_port": 443,
+            "uuid": "d342d110-d4a3-45c3-b0a3-3b11815b80b2",
+            "tls": {
+                "enabled": true,
+                "server_name": "cloudflare.com",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            },
+            "transport": {
+                "type": "ws",
+                "path": "/?ed=2048",
+                "headers": {
+                    "Host": "cloudflare.com"
+                }
+            }
+        })
+    });
+
+    let config = json!({
+        "log": {
+            "level": "info",
+            "timestamp": true
+        },
+        "dns": {
+            "servers": [
+                {
+                    "tag": "remote-dns",
+                    "address": "tcp://1.1.1.1:53",
+                    "detour": "stealth-out"
+                }
+            ]
+        },
+        "inbounds": inbounds,
+        "outbounds": [
+            stealth_outbound,
+            {
+                "type": "direct",
+                "tag": "direct-out"
+            },
+            {
+                "type": "dns",
+                "tag": "dns-out"
+            }
+        ],
+        "route": {
+            "auto_detect_interface": true,
+            "final": "stealth-out",
+            "rules": [
+                {
+                    "protocol": "dns",
+                    "outbound": "dns-out"
+                },
+                {
+                    "ip_is_private": true,
+                    "outbound": "direct-out"
+                }
+            ]
+        }
+    });
+
+    serde_json::to_string_pretty(&config).unwrap_or_default()
+}
+

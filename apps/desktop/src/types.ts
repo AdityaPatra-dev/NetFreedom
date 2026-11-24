@@ -1,4 +1,5 @@
 export type OperatingMode =
+  | 'stealth_tunnel'
   | 'warp_shield'
   | 'dpi_desync'
   | 'custom_vpn'

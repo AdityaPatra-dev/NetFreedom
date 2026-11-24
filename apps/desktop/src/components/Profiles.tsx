@@ -5,11 +5,19 @@ export const Profiles: React.FC = () => {
   const profiles = [
     {
       id: '1',
-      name: 'Campus Wi-Fi Stealth (Recommended)',
-      mode: 'ByeDPI Desync',
-      desc: 'Split-SNI (2+s) + Low TTL (3) to bypass campus Cisco DPI with zero latency penalty.',
-      icon: Cpu,
+      name: 'Campus / Enterprise Wi-Fi Stealth (TCP 443)',
+      mode: 'Stealth Tunnel',
+      desc: 'Encrypted TLS 1.3 tunnel over TCP Port 443 to bypass strict Fortinet/Cisco category blocks and UDP drop policies.',
+      icon: Globe,
       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    },
+    {
+      id: '2',
+      name: 'Campus Wi-Fi ByeDPI (Stateless Filter)',
+      mode: 'ByeDPI Desync',
+      desc: 'Split-SNI (2+s) + Low TTL (3) to bypass basic ISP DPI with zero latency penalty.',
+      icon: Cpu,
+      color: 'text-teal-400 bg-teal-500/10 border-teal-500/20',
     },
     {
       id: '2',

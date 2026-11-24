@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
             #[cfg(target_os = "windows")]
             {
                 let _ = win_cmd("taskkill")
-                    .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
+                    .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe", "/IM", "sing-box.exe"])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
@@ -172,6 +172,22 @@ async fn main() -> anyhow::Result<()> {
                     .stderr(std::process::Stdio::null())
                     .status();
 
+                let _ = win_cmd("netsh")
+                    .args(&[
+                        "advfirewall",
+                        "firewall",
+                        "add",
+                        "rule",
+                        "name=NetFreedom_Block_QUIC",
+                        "dir=out",
+                        "action=block",
+                        "protocol=UDP",
+                        "remoteport=443",
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+
                 notify_wininet_proxy_change();
             }
 
@@ -209,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
                     .args(&["set", "org.gnome.system.proxy", "mode", "none"])
                     .status();
                 let _ = std::process::Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+                let _ = std::process::Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
             }
 
             #[cfg(target_os = "windows")]
@@ -229,7 +246,18 @@ async fn main() -> anyhow::Result<()> {
                     .stderr(std::process::Stdio::null())
                     .status();
                 let _ = win_cmd("taskkill")
-                    .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
+                    .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe", "/IM", "sing-box.exe"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                let _ = win_cmd("netsh")
+                    .args(&[
+                        "advfirewall",
+                        "firewall",
+                        "delete",
+                        "rule",
+                        "name=NetFreedom_Block_QUIC",
+                    ])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();

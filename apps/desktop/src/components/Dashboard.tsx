@@ -31,6 +31,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const getActiveProtocolLabel = (m: OperatingMode) => {
     switch (m) {
+      case 'stealth_tunnel':
+        return 'Stealth Tunnel (Encrypted TCP 443 - Campus Firewall Bypass)';
       case 'warp_shield':
         return 'WireGuard ChaCha20-Poly1305 (Cloudflare WARP)';
       case 'dpi_desync':
@@ -50,13 +52,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="flex-1 p-6 flex flex-col justify-between overflow-y-auto max-w-5xl mx-auto w-full">
       {/* Mode Selector Carousel */}
-      <div className="grid grid-cols-5 gap-2.5 mb-6">
+      <div className="grid grid-cols-6 gap-2 mb-6">
         {[
           { id: 'auto_pilot', label: 'Auto-Pilot', desc: '1-Click Adaptive', icon: Zap },
+          { id: 'stealth_tunnel', label: 'Stealth Tunnel', desc: 'TCP 443 (Campus)', icon: Globe },
           { id: 'warp_shield', label: 'WARP Shield', desc: 'WireGuard (Port 2408)', icon: Shield },
           { id: 'dpi_desync', label: 'ByeDPI Desync', desc: 'Serverless 0ms Latency', icon: Cpu },
           { id: 'custom_vpn', label: 'Custom VPN', desc: 'WireGuard / .conf', icon: Server },
-          { id: 'modular_proxy', label: 'SOCKS5 Proxy', desc: 'Modular Proxy', icon: Globe },
+          { id: 'modular_proxy', label: 'SOCKS5 Proxy', desc: 'Modular Proxy', icon: Server },
         ].map((item) => {
           const Icon = item.icon;
           const active = mode === item.id;

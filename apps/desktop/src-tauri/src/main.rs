@@ -3,6 +3,7 @@
 
 use netfreedom_common::{ConnectionStatus, HealthMetrics};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -41,6 +42,116 @@ fn notify_wininet_proxy_change() {
             }
         }
     }
+}
+
+fn find_singbox_binary() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(ref d) = exe_dir {
+            candidates.push(d.join("sing-box.exe"));
+            candidates.push(d.join("third_party").join("sing-box").join("windows").join("sing-box.exe"));
+        }
+        if let Ok(cur) = std::env::current_dir() {
+            candidates.push(cur.join("sing-box.exe"));
+            candidates.push(cur.join("third_party").join("sing-box").join("windows").join("sing-box.exe"));
+        }
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local_app_data).join("Programs").join("NetFreedom").join("sing-box.exe"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            candidates.push(PathBuf::from(prog_files).join("NetFreedom").join("sing-box.exe"));
+        }
+        candidates.push(PathBuf::from("sing-box.exe"));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(PathBuf::from("/usr/local/bin/sing-box"));
+        candidates.push(PathBuf::from("/usr/bin/sing-box"));
+        candidates.push(PathBuf::from("third_party/sing-box/linux/sing-box"));
+        candidates.push(PathBuf::from("./third_party/sing-box/linux/sing-box"));
+        if let Some(ref d) = exe_dir {
+            candidates.push(d.join("sing-box"));
+            candidates.push(d.join("third_party").join("sing-box").join("linux").join("sing-box"));
+        }
+        if let Ok(cur) = std::env::current_dir() {
+            candidates.push(cur.join("third_party").join("sing-box").join("linux").join("sing-box"));
+            candidates.push(cur.join("sing-box"));
+        }
+        candidates.push(PathBuf::from("sing-box"));
+    }
+
+    candidates.into_iter().find(|p| p.exists())
+}
+
+fn find_ciadpi_binary() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(ref d) = exe_dir {
+            candidates.push(d.join("ciadpi.exe"));
+            candidates.push(d.join("third_party").join("byedpi").join("ciadpi.exe"));
+        }
+        if let Ok(cur) = std::env::current_dir() {
+            candidates.push(cur.join("ciadpi.exe"));
+            candidates.push(cur.join("third_party").join("byedpi").join("ciadpi.exe"));
+        }
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local_app_data).join("Programs").join("NetFreedom").join("ciadpi.exe"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            candidates.push(PathBuf::from(prog_files).join("NetFreedom").join("ciadpi.exe"));
+        }
+        candidates.push(PathBuf::from("ciadpi.exe"));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(PathBuf::from("/usr/local/bin/ciadpi"));
+        candidates.push(PathBuf::from("/usr/bin/ciadpi"));
+        candidates.push(PathBuf::from("./third_party/byedpi/ciadpi"));
+        candidates.push(PathBuf::from("third_party/byedpi/ciadpi"));
+        if let Some(ref d) = exe_dir {
+            candidates.push(d.join("ciadpi"));
+            candidates.push(d.join("third_party").join("byedpi").join("ciadpi"));
+        }
+        if let Ok(cur) = std::env::current_dir() {
+            candidates.push(cur.join("third_party").join("byedpi").join("ciadpi"));
+            candidates.push(cur.join("ciadpi"));
+        }
+        candidates.push(PathBuf::from("ciadpi"));
+    }
+
+    candidates.into_iter().find(|p| p.exists())
+}
+
+#[cfg(target_os = "windows")]
+fn find_goodbyedpi_binary() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+
+    if let Some(ref d) = exe_dir {
+        candidates.push(d.join("goodbyedpi.exe"));
+        candidates.push(d.join("third_party").join("goodbyedpi").join("goodbyedpi.exe"));
+    }
+    if let Ok(cur) = std::env::current_dir() {
+        candidates.push(cur.join("goodbyedpi.exe"));
+        candidates.push(cur.join("third_party").join("goodbyedpi").join("goodbyedpi.exe"));
+    }
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local_app_data).join("Programs").join("NetFreedom").join("goodbyedpi.exe"));
+    }
+    if let Ok(prog_files) = std::env::var("ProgramFiles") {
+        candidates.push(PathBuf::from(prog_files).join("NetFreedom").join("goodbyedpi.exe"));
+    }
+    candidates.push(PathBuf::from("goodbyedpi.exe"));
+
+    candidates.into_iter().find(|p| p.exists())
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -243,48 +354,55 @@ async fn connect_profile(
     let fake_rst = dpi_settings.as_ref().and_then(|s| s.fake_rst).unwrap_or(false);
     let local_port = dpi_settings.as_ref().and_then(|s| s.local_port).unwrap_or(1080);
 
+    let temp_dir = std::env::temp_dir().join("NetFreedom");
+    let _ = std::fs::create_dir_all(&temp_dir);
+
     #[cfg(target_os = "linux")]
     {
+        // 1. Terminate existing engine processes cleanly
         let _ = Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
         let _ = Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
 
-        if mode == "warp_shield" {
-            let mut singbox_candidates = vec![
-                std::path::PathBuf::from("/usr/local/bin/sing-box"),
-                std::path::PathBuf::from("/usr/bin/sing-box"),
-                std::path::PathBuf::from("third_party/sing-box/linux/sing-box"),
-                std::path::PathBuf::from("./third_party/sing-box/linux/sing-box"),
-            ];
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(parent) = exe.parent() {
-                    singbox_candidates.push(parent.join("sing-box"));
-                    singbox_candidates.push(parent.join("third_party").join("sing-box").join("linux").join("sing-box"));
-                }
-            }
-            if let Ok(cur) = std::env::current_dir() {
-                singbox_candidates.push(cur.join("third_party").join("sing-box").join("linux").join("sing-box"));
-            }
+        if mode == "stealth_tunnel" {
+            let singbox_bin = find_singbox_binary()
+                .ok_or_else(|| "Sing-Box universal engine binary not found on system.".to_string())?;
 
-            let singbox_bin = singbox_candidates
-                .into_iter()
-                .find(|p| p.exists())
-                .unwrap_or_else(|| std::path::PathBuf::from("sing-box"));
+            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(None, false, local_port);
+            let conf_path = temp_dir.join("singbox_stealth.json");
+            std::fs::write(&conf_path, json_conf)
+                .map_err(|e| format!("Failed to write singbox stealth config: {}", e))?;
 
-            if let Ok(warp_cfg) = netfreedom_vpn::get_or_register_warp_account().await {
-                let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, false, local_port);
-                let temp_dir = std::env::temp_dir().join("NetFreedom");
-                let _ = std::fs::create_dir_all(&temp_dir);
-                let conf_path = temp_dir.join("singbox_warp.json");
-                let _ = std::fs::write(&conf_path, json_conf);
+            Command::new(&singbox_bin)
+                .args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_stealth.json")])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to start Sing-Box Stealth Tunnel: {}", e))?;
 
-                let _ = Command::new(&singbox_bin)
-                    .args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_warp.json")])
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
-            }
+        } else if mode == "warp_shield" {
+            let singbox_bin = find_singbox_binary()
+                .ok_or_else(|| "Sing-Box universal engine binary not found on system.".to_string())?;
+
+            let warp_cfg = netfreedom_vpn::get_or_register_warp_account()
+                .await
+                .map_err(|e| format!("Failed to register WARP credentials: {}", e))?;
+
+            let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, false, local_port);
+            let conf_path = temp_dir.join("singbox_warp.json");
+            std::fs::write(&conf_path, json_conf)
+                .map_err(|e| format!("Failed to write singbox warp config: {}", e))?;
+
+            Command::new(&singbox_bin)
+                .args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_warp.json")])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to start Sing-Box engine: {}", e))?;
+
         } else {
+            // DPI Desync / Auto-Pilot / Hybrid Stealth mode
             let mut args = vec![
                 "-i".to_string(),
                 "127.0.0.1".to_string(),
@@ -310,31 +428,19 @@ async fn connect_profile(
             }
             args.push("-D".to_string());
 
-            let mut candidates = vec![
-                std::path::PathBuf::from("/usr/local/bin/ciadpi"),
-                std::path::PathBuf::from("/usr/bin/ciadpi"),
-                std::path::PathBuf::from("./third_party/byedpi/ciadpi"),
-                std::path::PathBuf::from("ciadpi"),
-            ];
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(parent) = exe.parent() {
-                    candidates.push(parent.join("ciadpi"));
-                    candidates.push(parent.join("third_party").join("byedpi").join("ciadpi"));
-                }
-            }
-            let ciadpi_bin = candidates
-                .into_iter()
-                .find(|p| p.exists())
-                .unwrap_or_else(|| std::path::PathBuf::from("ciadpi"));
+            let ciadpi_bin = find_ciadpi_binary()
+                .ok_or_else(|| "ciadpi (ByeDPI) executable not found.".to_string())?;
 
-            let ciadpi_status = Command::new(&ciadpi_bin)
+            Command::new(&ciadpi_bin)
                 .args(&args)
-                .status();
-
-            if let Err(e) = ciadpi_status {
-                return Err(format!("Failed to start ciadpi: {}", e));
-            }
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to start ciadpi: {}", e))?;
         }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
         // Set GNOME system proxy
         let _ = Command::new("gsettings")
@@ -367,94 +473,60 @@ async fn connect_profile(
 
     #[cfg(target_os = "windows")]
     {
-        // 1. Terminate existing engine processes
+        // 1. Terminate existing engine processes cleanly to prevent any port or driver conflicts
         let _ = win_cmd("taskkill")
             .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe", "/IM", "sing-box.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
 
-        let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+        if mode == "stealth_tunnel" {
+            let singbox_bin = find_singbox_binary()
+                .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
-        // 2. If WARP Shield mode is selected, launch Sing-Box universal engine with native Wintun TUN
-        if mode == "warp_shield" {
-            let mut singbox_candidates = Vec::new();
-            if let Some(ref d) = exe_dir {
-                singbox_candidates.push(d.join("sing-box.exe"));
-                singbox_candidates.push(d.join("third_party").join("sing-box").join("windows").join("sing-box.exe"));
-            }
-            if let Ok(cur) = std::env::current_dir() {
-                singbox_candidates.push(cur.join("sing-box.exe"));
-                singbox_candidates.push(cur.join("third_party").join("sing-box").join("windows").join("sing-box.exe"));
-            }
-            if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-                singbox_candidates.push(
-                    std::path::PathBuf::from(local_app_data)
-                        .join("Programs")
-                        .join("NetFreedom")
-                        .join("sing-box.exe"),
-                );
-            }
-            if let Ok(prog_files) = std::env::var("ProgramFiles") {
-                singbox_candidates.push(
-                    std::path::PathBuf::from(prog_files)
-                        .join("NetFreedom")
-                        .join("sing-box.exe"),
-                );
-            }
-            singbox_candidates.push(std::path::PathBuf::from("sing-box.exe"));
+            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(None, true, local_port);
+            let conf_path = temp_dir.join("singbox_stealth.json");
+            std::fs::write(&conf_path, json_conf)
+                .map_err(|e| format!("Failed to write Sing-Box stealth configuration: {}", e))?;
 
-            if let Some(singbox_bin) = singbox_candidates.into_iter().find(|p| p.exists()) {
-                if let Ok(warp_cfg) = netfreedom_vpn::get_or_register_warp_account().await {
-                    let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, true, 1080);
-                    let temp_dir = std::env::temp_dir().join("NetFreedom");
-                    let _ = std::fs::create_dir_all(&temp_dir);
-                    let conf_path = temp_dir.join("singbox_warp.json");
-                    let _ = std::fs::write(&conf_path, json_conf);
+            let mut cmd = win_cmd(&singbox_bin);
+            if let Some(parent) = singbox_bin.parent() {
+                cmd.current_dir(parent);
+            }
+            cmd.args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_stealth.json")])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to start Sing-Box Stealth Tunnel: {}", e))?;
 
-                    let mut cmd = win_cmd(&singbox_bin);
-                    if let Some(parent) = singbox_bin.parent() {
-                        cmd.current_dir(parent);
-                    }
-                    let _ = cmd
-                        .args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_warp.json")])
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn();
-                }
-            }
-        }
+        } else if mode == "warp_shield" {
+            let singbox_bin = find_singbox_binary()
+                .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
-        // 3. If GoodbyeDPI is available and mode is dpi_desync or auto_pilot, spawn kernel engine with working directory
-        if mode == "dpi_desync" || mode == "auto_pilot" || mode == "hybrid_stealth" {
-            let mut gbdpi_candidates = Vec::new();
-            if let Some(ref d) = exe_dir {
-                gbdpi_candidates.push(d.join("goodbyedpi.exe"));
-                gbdpi_candidates.push(d.join("third_party").join("goodbyedpi").join("goodbyedpi.exe"));
-            }
-            if let Ok(cur) = std::env::current_dir() {
-                gbdpi_candidates.push(cur.join("goodbyedpi.exe"));
-                gbdpi_candidates.push(cur.join("third_party").join("goodbyedpi").join("goodbyedpi.exe"));
-            }
-            if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-                gbdpi_candidates.push(
-                    std::path::PathBuf::from(local_app_data)
-                        .join("Programs")
-                        .join("NetFreedom")
-                        .join("goodbyedpi.exe"),
-                );
-            }
-            if let Ok(prog_files) = std::env::var("ProgramFiles") {
-                gbdpi_candidates.push(
-                    std::path::PathBuf::from(prog_files)
-                        .join("NetFreedom")
-                        .join("goodbyedpi.exe"),
-                );
-            }
-            gbdpi_candidates.push(std::path::PathBuf::from("goodbyedpi.exe"));
+            let warp_cfg = netfreedom_vpn::get_or_register_warp_account()
+                .await
+                .map_err(|e| format!("Cloudflare WARP registration failed: {}", e))?;
 
-            if let Some(gbdpi_bin) = gbdpi_candidates.into_iter().find(|p| p.exists()) {
+            let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, true, local_port);
+            let conf_path = temp_dir.join("singbox_warp.json");
+            std::fs::write(&conf_path, json_conf)
+                .map_err(|e| format!("Failed to write Sing-Box WARP configuration: {}", e))?;
+
+            let mut cmd = win_cmd(&singbox_bin);
+            if let Some(parent) = singbox_bin.parent() {
+                cmd.current_dir(parent);
+            }
+            cmd.args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_warp.json")])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to start Sing-Box universal engine: {}", e))?;
+
+        } else {
+            // DPI Desync / Auto-Pilot / Hybrid Stealth mode
+            if let Some(gbdpi_bin) = find_goodbyedpi_binary() {
                 let mut cmd = win_cmd(&gbdpi_bin);
                 if let Some(parent) = gbdpi_bin.parent() {
                     cmd.current_dir(parent);
@@ -466,34 +538,10 @@ async fn connect_profile(
                     .stderr(std::process::Stdio::null())
                     .spawn();
             }
-        }
 
-        // 4. Spawn ciadpi (ByeDPI SOCKS proxy) with customized parameters
-        let mut candidates = Vec::new();
-        if let Some(ref d) = exe_dir {
-            candidates.push(d.join("ciadpi.exe"));
-        }
-        if let Ok(cur) = std::env::current_dir() {
-            candidates.push(cur.join("ciadpi.exe"));
-        }
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            candidates.push(
-                std::path::PathBuf::from(local_app_data)
-                    .join("Programs")
-                    .join("NetFreedom")
-                    .join("ciadpi.exe"),
-            );
-        }
-        if let Ok(prog_files) = std::env::var("ProgramFiles") {
-            candidates.push(
-                std::path::PathBuf::from(prog_files)
-                    .join("NetFreedom")
-                    .join("ciadpi.exe"),
-            );
-        }
-        candidates.push(std::path::PathBuf::from("ciadpi.exe"));
+            let ciadpi_bin = find_ciadpi_binary()
+                .ok_or_else(|| "ciadpi.exe binary not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
-        if let Some(ciadpi_bin) = candidates.into_iter().find(|p| p.exists()) {
             let mut args = vec![
                 "-i".to_string(),
                 "127.0.0.1".to_string(),
@@ -520,17 +568,21 @@ async fn connect_profile(
                 args.push("1+s".to_string());
             }
 
-            let _ = win_cmd(&ciadpi_bin)
-                .args(&args)
+            let mut cmd = win_cmd(&ciadpi_bin);
+            if let Some(parent) = ciadpi_bin.parent() {
+                cmd.current_dir(parent);
+            }
+            cmd.args(&args)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn();
+                .spawn()
+                .map_err(|e| format!("Failed to start ByeDPI engine: {}", e))?;
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-        // 4. Set Windows internet proxy via Registry
+        // Set Windows internet proxy via Registry to intercept browser HTTP/HTTPS traffic
         let proxy_str = format!("socks=127.0.0.1:{}", local_port);
         let _ = win_cmd("reg")
             .args(&[
@@ -563,7 +615,7 @@ async fn connect_profile(
             .stderr(std::process::Stdio::null())
             .status();
 
-        // 5. Block outbound UDP 443 (QUIC / HTTP/3) so browsers automatically fall back to desynchronized TCP TLS 1.3
+        // Block outbound UDP 443 (QUIC / HTTP/3) so browsers automatically fall back to desynchronized TCP TLS 1.3
         let _ = win_cmd("netsh")
             .args(&[
                 "advfirewall",
@@ -580,7 +632,7 @@ async fn connect_profile(
             .stderr(std::process::Stdio::null())
             .status();
 
-        // 6. Force Windows WinINet cache to refresh immediately (Chrome / Edge / Firefox)
+        // Force Windows WinINet cache to refresh immediately (Chrome / Edge / Firefox)
         notify_wininet_proxy_change();
     }
 
@@ -600,6 +652,7 @@ async fn disconnect_profile() -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
+        // 1. Reset proxy in registry
         let _ = win_cmd("reg")
             .args(&[
                 "add",
@@ -615,13 +668,15 @@ async fn disconnect_profile() -> Result<String, String> {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+
+        // 2. Terminate all engine processes
         let _ = win_cmd("taskkill")
             .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe", "/IM", "sing-box.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
 
-        // 2. Remove outbound QUIC block rule
+        // 3. Remove outbound QUIC block rule
         let _ = win_cmd("netsh")
             .args(&[
                 "advfirewall",
