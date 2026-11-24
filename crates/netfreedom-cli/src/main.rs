@@ -43,13 +43,12 @@ async fn main() -> anyhow::Result<()> {
                         "-s", "2+s",
                         "-f", "-1",
                         "-t", "3",
-                        "-d", "1+s",
                         "-D"
                     ])
                     .status();
                 if status.is_err() || !status.unwrap().success() {
                     let _ = std::process::Command::new("ciadpi")
-                        .args(&["-i", "127.0.0.1", "-p", "1080", "-I", "0.0.0.0", "-s", "2+s", "-f", "-1", "-t", "3", "-d", "1+s", "-D"])
+                        .args(&["-i", "127.0.0.1", "-p", "1080", "-I", "0.0.0.0", "-s", "2+s", "-f", "-1", "-t", "3", "-D"])
                         .status();
                 }
 
@@ -99,7 +98,6 @@ async fn main() -> anyhow::Result<()> {
                         "-s", "2+s",
                         "-f", "-1",
                         "-t", "3",
-                        "-d", "1+s",
                     ])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())

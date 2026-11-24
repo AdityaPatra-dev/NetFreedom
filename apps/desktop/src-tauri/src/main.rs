@@ -96,7 +96,6 @@ async fn connect_profile(mode: String) -> Result<String, String> {
                 "-s", "2+s",
                 "-f", "-1",
                 "-t", "3",
-                "-d", "1+s",
                 "-D",
             ])
             .status();

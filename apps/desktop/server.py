@@ -135,8 +135,6 @@ def start_bypass():
         "-1",
         "-t",
         "3",
-        "-d",
-        "1+s",
         "-D",
     ]
     subprocess.run(cmd, check=True)
