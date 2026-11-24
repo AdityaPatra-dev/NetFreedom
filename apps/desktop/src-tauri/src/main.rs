@@ -63,7 +63,7 @@ fn get_connection_status() -> ConnectionStatus {
             false
         };
 
-        if is_running || is_proxy_enabled {
+        if is_running && is_proxy_enabled {
             ConnectionStatus::Connected
         } else {
             ConnectionStatus::Disconnected
@@ -138,16 +138,30 @@ async fn connect_profile(mode: String) -> Result<String, String> {
             .status();
 
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
-        let ciadpi_candidate = exe_dir.as_ref().map(|p| p.join("ciadpi.exe")).filter(|p| p.exists());
-        let ciadpi_bin = if let Some(ref p) = ciadpi_candidate {
-            p.to_str().unwrap_or("ciadpi.exe")
-        } else if std::path::Path::new("ciadpi.exe").exists() {
-            "ciadpi.exe"
-        } else {
-            "third_party\\byedpi\\ciadpi.exe"
+        let mut candidates = Vec::new();
+        if let Some(ref d) = exe_dir {
+            candidates.push(d.join("ciadpi.exe"));
+        }
+        if let Ok(cur) = std::env::current_dir() {
+            candidates.push(cur.join("ciadpi.exe"));
+        }
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            candidates.push(std::path::PathBuf::from(local_app_data).join("Programs").join("NetFreedom").join("ciadpi.exe"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            candidates.push(std::path::PathBuf::from(prog_files).join("NetFreedom").join("ciadpi.exe"));
+        }
+        candidates.push(std::path::PathBuf::from("ciadpi.exe"));
+
+        let ciadpi_bin = candidates.into_iter().find(|p| p.exists());
+        let ciadpi_bin = match ciadpi_bin {
+            Some(p) => p,
+            None => {
+                return Err("ciadpi.exe not found! Please extract all files from the ZIP or run Install.bat.".to_string());
+            }
         };
 
-        let _ = win_cmd(ciadpi_bin)
+        let child = win_cmd(&ciadpi_bin)
             .args(&[
                 "-i", "127.0.0.1",
                 "-p", "1080",
@@ -160,6 +174,12 @@ async fn connect_profile(mode: String) -> Result<String, String> {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
+
+        if let Err(e) = child {
+            return Err(format!("Failed to start ciadpi.exe: {}. Check Windows Defender permissions.", e));
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Enable Windows internet proxy via Registry
         let _ = win_cmd("reg")
