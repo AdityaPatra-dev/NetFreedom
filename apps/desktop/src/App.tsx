@@ -64,7 +64,7 @@ export function App() {
     checkStatus();
   }, []);
 
-  // Live throughput ticker when connected
+  // Live throughput & latency sync when connected
   useEffect(() => {
     if (status !== 'connected') {
       setMetrics((prev) => ({
@@ -75,13 +75,15 @@ export function App() {
       return;
     }
 
-    const interval = setInterval(() => {
-      setMetrics((prev) => ({
-        ...prev,
-        download_bytes_sec: Math.floor(Math.random() * 25_000_000) + 10_000_000, // ~10-35 MB/s
-        upload_bytes_sec: Math.floor(Math.random() * 8_000_000) + 2_000_000,   // ~2-10 MB/s
-        tcp_latency_ms: 40 + Math.random() * 8,
-      }));
+    const interval = setInterval(async () => {
+      if (isTauriEnv) {
+        try {
+          const m = await invoke<HealthMetrics>('get_health_metrics');
+          if (m) setMetrics(m);
+        } catch (e) {
+          console.error('Failed to poll live metrics from backend:', e);
+        }
+      }
     }, 1000);
 
     return () => clearInterval(interval);
@@ -107,15 +109,21 @@ export function App() {
       setStatus('connecting');
       if (isTauriEnv) {
         try {
-          await invoke('connect_profile', { mode });
+          await invoke('connect_profile', { mode, dpiSettings });
           setStatus('connected');
+          const m = await invoke<HealthMetrics>('get_health_metrics');
+          if (m) setMetrics(m);
         } catch (err) {
           console.error('Failed to connect via Tauri', err);
           setStatus('disconnected');
         }
       } else {
         try {
-          const res = await fetch('/api/connect', { method: 'POST' });
+          const res = await fetch('/api/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode, dpiSettings }),
+          });
           if (res.ok) {
             setStatus('connected');
           } else {
@@ -155,7 +163,21 @@ export function App() {
           <DpiLab dpiSettings={dpiSettings} setDpiSettings={setDpiSettings} />
         )}
 
-        {currentTab === 'diagnostics' && <Diagnostics metrics={metrics} />}
+        {currentTab === 'diagnostics' && (
+          <Diagnostics
+            metrics={metrics}
+            onRefreshMetrics={async () => {
+              if (isTauriEnv) {
+                try {
+                  const m = await invoke<HealthMetrics>('get_health_metrics');
+                  if (m) setMetrics(m);
+                } catch (e) {
+                  console.error('Diagnostic metric refresh failed:', e);
+                }
+              }
+            }}
+          />
+        )}
 
         {currentTab === 'settings' && <Settings />}
       </main>

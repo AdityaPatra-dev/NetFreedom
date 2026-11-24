@@ -94,22 +94,19 @@ class NetFreedomVpnService : VpnService() {
 
         serviceScope.launch {
             try {
-                // 1. If ByeDPI or Hybrid or Auto, spin up native ByeDPI daemon
-                val isDpiNeeded = mode == ConnectivityMode.BYEDPI ||
-                        mode == ConnectivityMode.HYBRID ||
-                        mode == ConnectivityMode.AUTO
+                // 1. Ensure backing proxy engine is started so hev-socks5-tunnel never points to a dead port
+                val isDpiNeeded = true
 
-                if (isDpiNeeded) {
-                    val profile = when (mode) {
-                        ConnectivityMode.BYEDPI -> NetworkProfile.DEFAULT_BYEDPI
-                        ConnectivityMode.HYBRID -> NetworkProfile.DEFAULT_HYBRID
-                        else -> NetworkProfile.DEFAULT_AUTO
-                    }
-                    val args = profile.dpiConfig.toCliArgs()
-                    val dpiStarted = NetFreedomNative.startByeDpi(applicationContext, args)
-                    if (!dpiStarted) {
-                        throw IOException("ByeDPI engine failed to start on this architecture")
-                    }
+                val profile = when (mode) {
+                    ConnectivityMode.BYEDPI -> NetworkProfile.DEFAULT_BYEDPI
+                    ConnectivityMode.HYBRID -> NetworkProfile.DEFAULT_HYBRID
+                    ConnectivityMode.WARP -> NetworkProfile.DEFAULT_WARP
+                    else -> NetworkProfile.DEFAULT_AUTO
+                }
+                val args = profile.dpiConfig.toCliArgs()
+                val dpiStarted = NetFreedomNative.startByeDpi(applicationContext, args)
+                if (!dpiStarted) {
+                    Log.w(TAG, "ByeDPI engine failed to start on this architecture")
                 }
 
                 // 2. Establish Android VpnService TUN

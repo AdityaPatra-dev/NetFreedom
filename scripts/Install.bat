@@ -28,8 +28,8 @@ copy /Y "%SCRIPT_DIR%Uninstall.bat" "%INSTALL_DIR%\" >nul 2>nul
 echo [*] Finalizing security permissions...
 powershell -NoProfile -Command "Get-ChildItem -Path '%INSTALL_DIR%' -Recurse | Unblock-File -ErrorAction SilentlyContinue" 2>nul
 
-echo [*] Creating Desktop Shortcut...
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\NetFreedom.lnk'); $s.TargetPath = '%INSTALL_DIR%\NetFreedom-GUI.exe'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Description = 'NetFreedom Universal Bypass'; $s.Save()"
+echo [*] Creating Desktop Shortcut with Administrator privileges...
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $p = [Environment]::GetFolderPath('Desktop') + '\NetFreedom.lnk'; $s = $ws.CreateShortcut($p); $s.TargetPath = '%INSTALL_DIR%\NetFreedom-GUI.exe'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Description = 'NetFreedom Universal Bypass'; $s.Save(); $b = [System.IO.File]::ReadAllBytes($p); $b[21] = $b[21] -bor 0x20; [System.IO.File]::WriteAllBytes($p, $b);"
 
 echo.
 echo ==============================================

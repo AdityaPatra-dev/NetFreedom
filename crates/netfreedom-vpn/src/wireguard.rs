@@ -1,5 +1,18 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use base64::Engine;
 use netfreedom_common::WireGuardConfig;
+
+/// Decodes a standard Base64 WireGuard 32-byte key.
+pub fn decode_base64_key(key: &str) -> Result<[u8; 32]> {
+    let clean = key.trim();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(clean)?;
+    if bytes.len() != 32 {
+        return Err(anyhow!("Key length is {} bytes, expected 32", bytes.len()));
+    }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&bytes);
+    Ok(arr)
+}
 
 /// Parses a standard WireGuard (.conf) file into WireGuardConfig.
 pub fn parse_wireguard_conf(content: &str) -> Result<WireGuardConfig> {

@@ -4,16 +4,23 @@ import { HealthMetrics } from '../types';
 
 interface DiagnosticsProps {
   metrics: HealthMetrics;
+  onRefreshMetrics?: () => Promise<void> | void;
 }
 
-export const Diagnostics: React.FC<DiagnosticsProps> = ({ metrics }) => {
+export const Diagnostics: React.FC<DiagnosticsProps> = ({ metrics, onRefreshMetrics }) => {
   const [running, setRunning] = useState(false);
 
-  const runAllTests = () => {
+  const runAllTests = async () => {
     setRunning(true);
-    setTimeout(() => {
-      setRunning(false);
-    }, 1500);
+    try {
+      if (onRefreshMetrics) {
+        await onRefreshMetrics();
+      }
+    } finally {
+      setTimeout(() => {
+        setRunning(false);
+      }, 500);
+    }
   };
 
   return (

@@ -29,6 +29,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
 
+  const getActiveProtocolLabel = (m: OperatingMode) => {
+    switch (m) {
+      case 'warp_shield':
+        return 'WireGuard ChaCha20-Poly1305 (Cloudflare WARP)';
+      case 'dpi_desync':
+        return 'ByeDPI / WinDivert Kernel Desynchronization';
+      case 'custom_vpn':
+        return 'WireGuard Custom Tunnel';
+      case 'modular_proxy':
+        return 'SOCKS5 Modular Proxy (Port 1080)';
+      case 'hybrid_stealth':
+        return 'Hybrid (ByeDPI + WARP Shield)';
+      case 'auto_pilot':
+      default:
+        return 'Adaptive Auto-Pilot (DPI Desync + WireGuard)';
+    }
+  };
+
   return (
     <div className="flex-1 p-6 flex flex-col justify-between overflow-y-auto max-w-5xl mx-auto w-full">
       {/* Mode Selector Carousel */}
@@ -92,7 +110,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         <div className="mt-4 text-center">
           <div className="text-xs font-mono text-gray-400">
-            {isConnected ? 'Active Protocol: WireGuard ChaCha20-Poly1305' : 'Select a mode and click connect'}
+            {isConnected ? `Active Protocol: ${getActiveProtocolLabel(mode)}` : 'Select a mode and click connect'}
           </div>
         </div>
       </div>
