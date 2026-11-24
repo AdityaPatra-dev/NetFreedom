@@ -44,6 +44,27 @@ fn notify_wininet_proxy_change() {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn is_admin() -> bool {
+    unsafe {
+        type IsUserAnAdminFn = unsafe extern "system" fn() -> i32;
+        extern "system" {
+            fn LoadLibraryA(lpLibFileName: *const i8) -> *mut std::ffi::c_void;
+            fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
+        }
+
+        let h_shell32 = LoadLibraryA(b"shell32.dll\0".as_ptr() as *const i8);
+        if !h_shell32.is_null() {
+            let proc = GetProcAddress(h_shell32, b"IsUserAnAdmin\0".as_ptr() as *const i8);
+            if !proc.is_null() {
+                let func: IsUserAnAdminFn = std::mem::transmute(proc);
+                return func() != 0;
+            }
+        }
+        false
+    }
+}
+
 fn find_singbox_binary() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
@@ -480,11 +501,14 @@ async fn connect_profile(
             .stderr(std::process::Stdio::null())
             .status();
 
+        let has_admin = is_admin();
+        let enable_tun = has_admin;
+
         if mode == "stealth_tunnel" {
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
-            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(None, true, local_port);
+            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(None, enable_tun, local_port);
             let conf_path = temp_dir.join("singbox_stealth.json");
             std::fs::write(&conf_path, json_conf)
                 .map_err(|e| format!("Failed to write Sing-Box stealth configuration: {}", e))?;
@@ -508,7 +532,7 @@ async fn connect_profile(
                 .await
                 .map_err(|e| format!("Cloudflare WARP registration failed: {}", e))?;
 
-            let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, true, local_port);
+            let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, enable_tun, local_port);
             let conf_path = temp_dir.join("singbox_warp.json");
             std::fs::write(&conf_path, json_conf)
                 .map_err(|e| format!("Failed to write Sing-Box WARP configuration: {}", e))?;
@@ -526,17 +550,19 @@ async fn connect_profile(
 
         } else {
             // DPI Desync / Auto-Pilot / Hybrid Stealth mode
-            if let Some(gbdpi_bin) = find_goodbyedpi_binary() {
-                let mut cmd = win_cmd(&gbdpi_bin);
-                if let Some(parent) = gbdpi_bin.parent() {
-                    cmd.current_dir(parent);
+            if has_admin {
+                if let Some(gbdpi_bin) = find_goodbyedpi_binary() {
+                    let mut cmd = win_cmd(&gbdpi_bin);
+                    if let Some(parent) = gbdpi_bin.parent() {
+                        cmd.current_dir(parent);
+                    }
+                    let _ = cmd
+                        .args(&["-9"])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
                 }
-                let _ = cmd
-                    .args(&["-9"])
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
             }
 
             let ciadpi_bin = find_ciadpi_binary()
