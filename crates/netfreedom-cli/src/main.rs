@@ -81,7 +81,11 @@ async fn main() -> anyhow::Result<()> {
 
             #[cfg(target_os = "windows")]
             {
-                let _ = std::process::Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
+                let _ = std::process::Command::new("taskkill")
+                    .args(&["/F", "/IM", "ciadpi.exe"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
                 let ciadpi_bin = if std::path::Path::new("ciadpi.exe").exists() {
                     "ciadpi.exe"
                 } else {
@@ -97,6 +101,8 @@ async fn main() -> anyhow::Result<()> {
                         "-t", "3",
                         "-d", "1+s",
                     ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
                     .spawn();
 
                 let _ = std::process::Command::new("reg")
@@ -111,6 +117,8 @@ async fn main() -> anyhow::Result<()> {
                         "1",
                         "/f",
                     ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
                     .status();
                 let _ = std::process::Command::new("reg")
                     .args(&[
@@ -124,6 +132,8 @@ async fn main() -> anyhow::Result<()> {
                         "socks=127.0.0.1:1080",
                         "/f",
                     ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
                     .status();
             }
 
@@ -131,12 +141,17 @@ async fn main() -> anyhow::Result<()> {
             let _ = client.post("http://127.0.0.1:1420/api/connect").send().await;
 
             println!("[+] NetFreedom Stealth Bypass is now ACTIVE system-wide!");
-            println!("  * Proxy: SOCKS5 127.0.0.1:1080 + HTTP/HTTPS CONNECT 127.0.0.1:1081");
+            println!("  * Proxy: SOCKS5 127.0.0.1:1080");
             println!("  * Mode: SNI Cleave (2+s) + Fake TTL (3) + TCP Disordering");
-            println!("  * GNOME System Proxy: manual (All browsers routed automatically)");
+            println!("  * Windows System Proxy: ACTIVE (All browsers routed automatically)");
             println!("\n[>] Verifying access to https://en-thunderscans.com...");
+            let proxy_url = if cfg!(target_os = "windows") {
+                "socks5h://127.0.0.1:1080"
+            } else {
+                "http://127.0.0.1:1081"
+            };
             let test = std::process::Command::new("curl")
-                .args(&["-s", "-I", "--connect-timeout", "3", "--proxy", "http://127.0.0.1:1081", "https://en-thunderscans.com"])
+                .args(&["-s", "-I", "--connect-timeout", "4", "--proxy", proxy_url, "https://en-thunderscans.com"])
                 .output();
             if let Ok(out) = test {
                 let s = String::from_utf8_lossy(&out.stdout);
@@ -172,8 +187,14 @@ async fn main() -> anyhow::Result<()> {
                         "0",
                         "/f",
                     ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
                     .status();
-                let _ = std::process::Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
+                let _ = std::process::Command::new("taskkill")
+                    .args(&["/F", "/IM", "ciadpi.exe"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
             }
 
             println!("[+] NetFreedom Bypass deactivated. System returned to direct network mode.");
