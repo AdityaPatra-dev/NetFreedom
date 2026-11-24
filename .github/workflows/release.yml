@@ -85,13 +85,11 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Build Windows Desktop GUI
-        continue-on-error: true
         shell: pwsh
         run: |
           cd apps/desktop
           npm ci
-          npm run build
-          cargo build --release --manifest-path src-tauri/Cargo.toml
+          npx tauri build --no-bundle
           cd ../..
 
       - name: Download Signed Wintun Driver
@@ -112,9 +110,38 @@ jobs:
           Copy-Item "target\release\wintun.dll" "dist\$DirName\"
           Copy-Item "target\release\ciadpi.exe" "dist\$DirName\"
           Copy-Item "scripts\install-windows.ps1" "dist\$DirName\"
-          if (Test-Path "apps\desktop\src-tauri\target\release\netfreedom-desktop.exe") {
-            Copy-Item "apps\desktop\src-tauri\target\release\netfreedom-desktop.exe" "dist\$DirName\NetFreedom-GUI.exe"
+
+          # Locate and package NetFreedom-GUI.exe
+          $GuiFound = $false
+          $GuiCandidates = @(
+            "apps\desktop\src-tauri\target\release\NetFreedom.exe",
+            "apps\desktop\src-tauri\target\release\netfreedom-desktop.exe",
+            "apps\desktop\target\release\NetFreedom.exe",
+            "apps\desktop\target\release\netfreedom-desktop.exe"
+          )
+          foreach ($guiPath in $GuiCandidates) {
+            if (Test-Path $guiPath) {
+              Copy-Item $guiPath "dist\$DirName\NetFreedom-GUI.exe"
+              Write-Host "Found GUI executable at $guiPath -> packaged as NetFreedom-GUI.exe"
+              $GuiFound = $true
+              break
+            }
           }
+          if (-not $GuiFound) {
+            Write-Host "Searching all apps/desktop for GUI exe..."
+            Get-ChildItem -Path "apps\desktop" -Recurse -Filter "*.exe" | ForEach-Object {
+              Write-Host "Candidate exe found: $($_.FullName)"
+              if ($_.FullName -notmatch "node_modules") {
+                Copy-Item $_.FullName "dist\$DirName\NetFreedom-GUI.exe"
+                $GuiFound = $true
+              }
+            }
+          }
+          if (-not $GuiFound) {
+            Write-Error "CRITICAL: NetFreedom GUI binary was not produced!"
+            exit 1
+          }
+
           Compress-Archive -Path "dist\$DirName" -DestinationPath "dist\$DirName.zip"
           Get-FileHash "dist\$DirName.zip" -Algorithm SHA256 | Out-File "dist\$DirName.zip.sha256"
 
@@ -278,7 +305,7 @@ jobs:
             
             ### 🪟 Windows Distribution
             
-            - **`netfreedom-*-windows-x86_64.zip`**: Includes `netfreedom.exe`, `netfreedom-daemon.exe`, signed `wintun.dll`, and `install-windows.ps1` service installer.
+            - **`netfreedom-*-windows-x86_64.zip`**: Includes **`NetFreedom-GUI.exe`** (Graphical Desktop App), `netfreedom.exe` CLI, `netfreedom-daemon.exe`, `ciadpi.exe`, signed `wintun.dll`, and `install-windows.ps1` service installer.
             
             ---
             

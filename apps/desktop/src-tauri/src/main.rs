@@ -120,7 +120,11 @@ async fn connect_profile(mode: String) -> Result<String, String> {
     {
         let _ = Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
 
-        let ciadpi_bin = if std::path::Path::new("ciadpi.exe").exists() {
+        let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+        let ciadpi_candidate = exe_dir.as_ref().map(|p| p.join("ciadpi.exe")).filter(|p| p.exists());
+        let ciadpi_bin = if let Some(ref p) = ciadpi_candidate {
+            p.to_str().unwrap_or("ciadpi.exe")
+        } else if std::path::Path::new("ciadpi.exe").exists() {
             "ciadpi.exe"
         } else {
             "third_party\\byedpi\\ciadpi.exe"
@@ -134,7 +138,6 @@ async fn connect_profile(mode: String) -> Result<String, String> {
                 "-s", "2+s",
                 "-f", "-1",
                 "-t", "3",
-                "-d", "1+s",
             ])
             .spawn();
 

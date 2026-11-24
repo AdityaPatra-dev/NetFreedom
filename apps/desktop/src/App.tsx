@@ -6,6 +6,9 @@ import { Diagnostics } from './components/Diagnostics';
 import { Settings } from './components/Settings';
 import { Profiles } from './components/Profiles';
 import { ConnectionStatus, DpiSettings, HealthMetrics, OperatingMode } from './types';
+import { invoke } from '@tauri-apps/api/core';
+
+const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -15,7 +18,7 @@ export function App() {
   const [dpiSettings, setDpiSettings] = useState<DpiSettings>({
     split_pos: '2+s',
     fake_ttl: 3,
-    disorder: true,
+    disorder: false,
     fake_rst: false,
     local_port: 1080,
   });
@@ -37,14 +40,25 @@ export function App() {
   // Initial status check & periodic sync
   useEffect(() => {
     const checkStatus = async () => {
-      try {
-        const res = await fetch('/api/status');
-        if (res.ok) {
-          const data = await res.json();
-          setStatus(data.status === 'connected' ? 'connected' : 'disconnected');
+      if (isTauriEnv) {
+        try {
+          const s = await invoke<string>('get_connection_status');
+          setStatus(s.toLowerCase() === 'connected' ? 'connected' : 'disconnected');
+          const m = await invoke<HealthMetrics>('get_health_metrics');
+          if (m) setMetrics(m);
+        } catch (e) {
+          console.error('Tauri status check failed:', e);
         }
-      } catch {
-        // Fallback or running standalone
+      } else {
+        try {
+          const res = await fetch('/api/status');
+          if (res.ok) {
+            const data = await res.json();
+            setStatus(data.status === 'connected' ? 'connected' : 'disconnected');
+          }
+        } catch {
+          // Fallback or running standalone
+        }
       }
     };
     checkStatus();
@@ -75,24 +89,42 @@ export function App() {
 
   const handleToggleConnect = async () => {
     if (status === 'connected') {
-      try {
-        await fetch('/api/disconnect', { method: 'POST' });
-      } catch (err) {
-        console.error('Failed to disconnect via API', err);
+      if (isTauriEnv) {
+        try {
+          await invoke('disconnect_profile');
+        } catch (err) {
+          console.error('Failed to disconnect via Tauri', err);
+        }
+      } else {
+        try {
+          await fetch('/api/disconnect', { method: 'POST' });
+        } catch (err) {
+          console.error('Failed to disconnect via API', err);
+        }
       }
       setStatus('disconnected');
     } else {
       setStatus('connecting');
-      try {
-        const res = await fetch('/api/connect', { method: 'POST' });
-        if (res.ok) {
+      if (isTauriEnv) {
+        try {
+          await invoke('connect_profile', { mode });
           setStatus('connected');
-        } else {
+        } catch (err) {
+          console.error('Failed to connect via Tauri', err);
           setStatus('disconnected');
         }
-      } catch (err) {
-        console.error('Failed to connect via API', err);
-        setStatus('connected'); // Allow fallback UI state
+      } else {
+        try {
+          const res = await fetch('/api/connect', { method: 'POST' });
+          if (res.ok) {
+            setStatus('connected');
+          } else {
+            setStatus('disconnected');
+          }
+        } catch (err) {
+          console.error('Failed to connect via API', err);
+          setStatus('connected'); // Allow fallback UI state
+        }
       }
     }
   };
