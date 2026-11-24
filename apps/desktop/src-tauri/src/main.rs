@@ -62,15 +62,6 @@ struct TelemetryTracker {
 
 static TELEMETRY: Mutex<Option<TelemetryTracker>> = Mutex::new(None);
 
-#[cfg(target_os = "windows")]
-struct ActiveTunnelState {
-    wireguard: netfreedom_vpn::WireGuardTunnel,
-    is_running: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[cfg(target_os = "windows")]
-static ACTIVE_TUNNEL: Mutex<Option<ActiveTunnelState>> = Mutex::new(None);
-
 #[tauri::command]
 fn get_connection_status() -> ConnectionStatus {
     #[cfg(target_os = "linux")]
@@ -84,8 +75,10 @@ fn get_connection_status() -> ConnectionStatus {
             false
         };
 
-        let pgrep_out = Command::new("pgrep").arg("-f").arg("ciadpi").status();
-        let is_running = pgrep_out.map(|s| s.success()).unwrap_or(false);
+        let pgrep_ciadpi = Command::new("pgrep").arg("-f").arg("ciadpi").status();
+        let pgrep_singbox = Command::new("pgrep").arg("-f").arg("sing-box").status();
+        let is_running = pgrep_ciadpi.map(|s| s.success()).unwrap_or(false)
+            || pgrep_singbox.map(|s| s.success()).unwrap_or(false);
 
         if is_running && is_manual {
             ConnectionStatus::Connected
@@ -99,7 +92,7 @@ fn get_connection_status() -> ConnectionStatus {
         let tasklist_out = win_cmd("tasklist").output();
         let is_running = if let Ok(out) = tasklist_out {
             let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            s.contains("ciadpi") || s.contains("goodbyedpi")
+            s.contains("ciadpi") || s.contains("goodbyedpi") || s.contains("sing-box")
         } else {
             false
         };
@@ -253,55 +246,94 @@ async fn connect_profile(
     #[cfg(target_os = "linux")]
     {
         let _ = Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+        let _ = Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
 
-        let mut args = vec![
-            "-i".to_string(),
-            "127.0.0.1".to_string(),
-            "-p".to_string(),
-            local_port.to_string(),
-            "-I".to_string(),
-            "0.0.0.0".to_string(),
-            "-s".to_string(),
-            split_pos,
-            "-f".to_string(),
-            "-1".to_string(),
-            "-t".to_string(),
-            fake_ttl.to_string(),
-        ];
-
-        if disorder {
-            args.push("-d".to_string());
-            args.push("1+s".to_string());
-        }
-        if fake_rst {
-            args.push("-r".to_string());
-            args.push("1+s".to_string());
-        }
-        args.push("-D".to_string());
-
-        let mut candidates = vec![
-            std::path::PathBuf::from("/usr/local/bin/ciadpi"),
-            std::path::PathBuf::from("/usr/bin/ciadpi"),
-            std::path::PathBuf::from("./third_party/byedpi/ciadpi"),
-            std::path::PathBuf::from("ciadpi"),
-        ];
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(parent) = exe.parent() {
-                candidates.push(parent.join("ciadpi"));
-                candidates.push(parent.join("third_party").join("byedpi").join("ciadpi"));
+        if mode == "warp_shield" {
+            let mut singbox_candidates = vec![
+                std::path::PathBuf::from("/usr/local/bin/sing-box"),
+                std::path::PathBuf::from("/usr/bin/sing-box"),
+                std::path::PathBuf::from("third_party/sing-box/linux/sing-box"),
+                std::path::PathBuf::from("./third_party/sing-box/linux/sing-box"),
+            ];
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(parent) = exe.parent() {
+                    singbox_candidates.push(parent.join("sing-box"));
+                    singbox_candidates.push(parent.join("third_party").join("sing-box").join("linux").join("sing-box"));
+                }
             }
-        }
-        let ciadpi_bin = candidates
-            .into_iter()
-            .find(|p| p.exists())
-            .unwrap_or_else(|| std::path::PathBuf::from("ciadpi"));
+            if let Ok(cur) = std::env::current_dir() {
+                singbox_candidates.push(cur.join("third_party").join("sing-box").join("linux").join("sing-box"));
+            }
 
-        let ciadpi_status = Command::new(&ciadpi_bin)
-            .args(&args)
-            .status();
+            let singbox_bin = singbox_candidates
+                .into_iter()
+                .find(|p| p.exists())
+                .unwrap_or_else(|| std::path::PathBuf::from("sing-box"));
 
-        if let Err(e) = ciadpi_status {
-            return Err(format!("Failed to start ciadpi: {}", e));
+            if let Ok(warp_cfg) = netfreedom_vpn::get_or_register_warp_account().await {
+                let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, false, local_port);
+                let temp_dir = std::env::temp_dir().join("NetFreedom");
+                let _ = std::fs::create_dir_all(&temp_dir);
+                let conf_path = temp_dir.join("singbox_warp.json");
+                let _ = std::fs::write(&conf_path, json_conf);
+
+                let _ = Command::new(&singbox_bin)
+                    .args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_warp.json")])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+        } else {
+            let mut args = vec![
+                "-i".to_string(),
+                "127.0.0.1".to_string(),
+                "-p".to_string(),
+                local_port.to_string(),
+                "-I".to_string(),
+                "0.0.0.0".to_string(),
+                "-s".to_string(),
+                split_pos,
+                "-f".to_string(),
+                "-1".to_string(),
+                "-t".to_string(),
+                fake_ttl.to_string(),
+            ];
+
+            if disorder {
+                args.push("-d".to_string());
+                args.push("1+s".to_string());
+            }
+            if fake_rst {
+                args.push("-r".to_string());
+                args.push("1+s".to_string());
+            }
+            args.push("-D".to_string());
+
+            let mut candidates = vec![
+                std::path::PathBuf::from("/usr/local/bin/ciadpi"),
+                std::path::PathBuf::from("/usr/bin/ciadpi"),
+                std::path::PathBuf::from("./third_party/byedpi/ciadpi"),
+                std::path::PathBuf::from("ciadpi"),
+            ];
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(parent) = exe.parent() {
+                    candidates.push(parent.join("ciadpi"));
+                    candidates.push(parent.join("third_party").join("byedpi").join("ciadpi"));
+                }
+            }
+            let ciadpi_bin = candidates
+                .into_iter()
+                .find(|p| p.exists())
+                .unwrap_or_else(|| std::path::PathBuf::from("ciadpi"));
+
+            let ciadpi_status = Command::new(&ciadpi_bin)
+                .args(&args)
+                .status();
+
+            if let Err(e) = ciadpi_status {
+                return Err(format!("Failed to start ciadpi: {}", e));
+            }
         }
 
         // Set GNOME system proxy
@@ -337,37 +369,59 @@ async fn connect_profile(
     {
         // 1. Terminate existing engine processes
         let _ = win_cmd("taskkill")
-            .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
+            .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe", "/IM", "sing-box.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
 
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
 
-        // 2. If WARP Shield mode is selected, initialize real BoringTun WireGuard + Wintun L3 adapter
+        // 2. If WARP Shield mode is selected, launch Sing-Box universal engine with native Wintun TUN
         if mode == "warp_shield" {
-            let (priv_key, _) = netfreedom_vpn::generate_warp_keypair();
-            if let Ok(peer_pub_key) = netfreedom_vpn::decode_base64_key(netfreedom_vpn::CLOUDFLARE_WARP_PUBLIC_KEY) {
-                if let Ok(endpoint) = netfreedom_vpn::CLOUDFLARE_WARP_ANYCAST_ENDPOINT.parse() {
-                    if let Ok(adapter) = netfreedom_tun::WintunAdapter::create_or_open("NetFreedom", "Wintun") {
-                        let (tun_tx, tun_rx, is_running) = adapter.start_io_bridge();
-                        if let Ok(tunnel) = netfreedom_vpn::WireGuardTunnel::start(
-                            priv_key,
-                            peer_pub_key,
-                            None,
-                            endpoint,
-                            tun_rx,
-                            tun_tx,
-                        ).await {
-                            let _ = netfreedom_tun::apply_double_slash_one_routes("NetFreedom", "192.168.1.1", "Ethernet", Some("188.114.96.1"));
-                            if let Ok(mut lock) = ACTIVE_TUNNEL.lock() {
-                                *lock = Some(ActiveTunnelState {
-                                    wireguard: tunnel,
-                                    is_running,
-                                });
-                            }
-                        }
+            let mut singbox_candidates = Vec::new();
+            if let Some(ref d) = exe_dir {
+                singbox_candidates.push(d.join("sing-box.exe"));
+                singbox_candidates.push(d.join("third_party").join("sing-box").join("windows").join("sing-box.exe"));
+            }
+            if let Ok(cur) = std::env::current_dir() {
+                singbox_candidates.push(cur.join("sing-box.exe"));
+                singbox_candidates.push(cur.join("third_party").join("sing-box").join("windows").join("sing-box.exe"));
+            }
+            if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+                singbox_candidates.push(
+                    std::path::PathBuf::from(local_app_data)
+                        .join("Programs")
+                        .join("NetFreedom")
+                        .join("sing-box.exe"),
+                );
+            }
+            if let Ok(prog_files) = std::env::var("ProgramFiles") {
+                singbox_candidates.push(
+                    std::path::PathBuf::from(prog_files)
+                        .join("NetFreedom")
+                        .join("sing-box.exe"),
+                );
+            }
+            singbox_candidates.push(std::path::PathBuf::from("sing-box.exe"));
+
+            if let Some(singbox_bin) = singbox_candidates.into_iter().find(|p| p.exists()) {
+                if let Ok(warp_cfg) = netfreedom_vpn::get_or_register_warp_account().await {
+                    let json_conf = netfreedom_vpn::generate_singbox_warp_config(&warp_cfg, true, 1080);
+                    let temp_dir = std::env::temp_dir().join("NetFreedom");
+                    let _ = std::fs::create_dir_all(&temp_dir);
+                    let conf_path = temp_dir.join("singbox_warp.json");
+                    let _ = std::fs::write(&conf_path, json_conf);
+
+                    let mut cmd = win_cmd(&singbox_bin);
+                    if let Some(parent) = singbox_bin.parent() {
+                        cmd.current_dir(parent);
                     }
+                    let _ = cmd
+                        .args(&["run", "-c", conf_path.to_str().unwrap_or("singbox_warp.json")])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
                 }
             }
         }
@@ -541,6 +595,7 @@ async fn disconnect_profile() -> Result<String, String> {
             .args(&["set", "org.gnome.system.proxy", "mode", "none"])
             .status();
         let _ = Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
+        let _ = Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
     }
 
     #[cfg(target_os = "windows")]
@@ -561,21 +616,12 @@ async fn disconnect_profile() -> Result<String, String> {
             .stderr(std::process::Stdio::null())
             .status();
         let _ = win_cmd("taskkill")
-            .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
+            .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe", "/IM", "sing-box.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
 
-        // 2. Tear down active WireGuard / Wintun tunnel if running
-        if let Ok(mut lock) = ACTIVE_TUNNEL.lock() {
-            if let Some(tunnel_state) = lock.take() {
-                tunnel_state.wireguard.stop();
-                tunnel_state.is_running.store(false, std::sync::atomic::Ordering::Relaxed);
-                let _ = netfreedom_tun::remove_double_slash_one_routes("NetFreedom", Some("188.114.96.1"));
-            }
-        }
-
-        // 3. Remove outbound QUIC block rule
+        // 2. Remove outbound QUIC block rule
         let _ = win_cmd("netsh")
             .args(&[
                 "advfirewall",

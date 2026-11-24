@@ -32,6 +32,14 @@ jobs:
       - name: Build Release Binaries
         run: cargo build --release -p netfreedom-cli -p netfreedom-daemon
 
+      - name: Download Sing-Box Universal Engine (Linux)
+        run: |
+          curl -L -o /tmp/sing-box-linux.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz
+          tar -xzf /tmp/sing-box-linux.tar.gz -C /tmp/
+          mkdir -p third_party/sing-box/linux
+          cp /tmp/sing-box-*/sing-box third_party/sing-box/linux/sing-box
+          chmod +x third_party/sing-box/linux/sing-box
+
       - name: Package Linux Distribution Tarball
         run: |
           TAG="${{ github.ref_name || inputs.version_tag }}"
@@ -42,6 +50,9 @@ jobs:
           cp scripts/netfreedom-daemon.service "dist/${ARCHIVE_DIR}/"
           cp scripts/org.netfreedom.policy "dist/${ARCHIVE_DIR}/"
           cp scripts/install-linux.sh "dist/${ARCHIVE_DIR}/"
+          if [ -f third_party/sing-box/linux/sing-box ]; then
+            cp third_party/sing-box/linux/sing-box "dist/${ARCHIVE_DIR}/"
+          fi
           cd dist
           tar -czvf "${ARCHIVE_DIR}.tar.gz" "${ARCHIVE_DIR}"
           sha256sum "${ARCHIVE_DIR}.tar.gz" > "${ARCHIVE_DIR}.tar.gz.sha256"
@@ -99,6 +110,14 @@ jobs:
           Expand-Archive "wintun.zip" -DestinationPath "wintun-extracted"
           Copy-Item "wintun-extracted\wintun\bin\amd64\wintun.dll" -Destination "target\release\wintun.dll"
 
+      - name: Download Sing-Box Universal Engine (Windows)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip" -OutFile "sing-box.zip"
+          Expand-Archive "sing-box.zip" -DestinationPath "sing-box-extracted"
+          New-Item -ItemType Directory -Path "third_party\sing-box\windows" -Force | Out-Null
+          Copy-Item "sing-box-extracted\sing-box-*\sing-box.exe" "third_party\sing-box\windows\sing-box.exe"
+
       - name: Package Windows ZIP Bundle
         shell: pwsh
         run: |
@@ -113,6 +132,9 @@ jobs:
             Copy-Item "third_party\goodbyedpi\goodbyedpi.exe" "dist\$DirName\"
             Copy-Item "third_party\goodbyedpi\WinDivert.dll" "dist\$DirName\"
             Copy-Item "third_party\goodbyedpi\WinDivert64.sys" "dist\$DirName\"
+          }
+          if (Test-Path "third_party\sing-box\windows\sing-box.exe") {
+            Copy-Item "third_party\sing-box\windows\sing-box.exe" "dist\$DirName\"
           }
           Copy-Item "scripts\install-windows.ps1" "dist\$DirName\"
           Copy-Item "scripts\Install.bat" "dist\$DirName\"

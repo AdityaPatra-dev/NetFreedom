@@ -27,7 +27,7 @@ if ($Uninstall) {
     Write-Host "[+] Stopping NetFreedom processes and services..."
     Stop-Service -Name "NetFreedomDaemon" -ErrorAction SilentlyContinue
     sc.exe delete "NetFreedomDaemon" | Out-Null
-    taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe 2>$null | Out-Null
+    taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe /IM sing-box.exe 2>$null | Out-Null
 
     # Reset System Proxy in Registry
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f | Out-Null
@@ -73,6 +73,7 @@ Copy-Item "$ScriptDir\goodbyedpi.exe" -Destination "$InstallPath\goodbyedpi.exe"
 Copy-Item "$ScriptDir\WinDivert.dll" -Destination "$InstallPath\WinDivert.dll" -Force -ErrorAction SilentlyContinue
 Copy-Item "$ScriptDir\WinDivert64.sys" -Destination "$InstallPath\WinDivert64.sys" -Force -ErrorAction SilentlyContinue
 Copy-Item "$ScriptDir\netfreedom-daemon.exe" -Destination "$InstallPath\netfreedom-daemon.exe" -Force -ErrorAction SilentlyContinue
+Copy-Item "$ScriptDir\sing-box.exe" -Destination "$InstallPath\sing-box.exe" -Force -ErrorAction SilentlyContinue
 Copy-Item "$ScriptDir\wintun.dll" -Destination "$InstallPath\wintun.dll" -Force -ErrorAction SilentlyContinue
 Get-ChildItem -Path $InstallPath -Recurse | Unblock-File -ErrorAction SilentlyContinue
 

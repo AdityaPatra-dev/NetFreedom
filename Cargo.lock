@@ -812,7 +812,6 @@ dependencies = [
  "netfreedom-dpi",
  "netfreedom-health",
  "netfreedom-security",
- "netfreedom-tun",
  "netfreedom-vpn",
  "reqwest",
  "serde_json",

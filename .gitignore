@@ -9,6 +9,7 @@
 *.so
 *.exe
 /third_party/byedpi/ciadpi
+third_party/sing-box/
 node_modules/
 dist/
 .env.local

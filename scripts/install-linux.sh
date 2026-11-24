@@ -32,6 +32,9 @@ install -m 755 "${ROOT_DIR}/target/release/netfreedom-daemon" /usr/local/bin/net
 if [ -f "${ROOT_DIR}/third_party/byedpi/ciadpi" ]; then
     install -m 755 "${ROOT_DIR}/third_party/byedpi/ciadpi" /usr/local/bin/ciadpi
 fi
+if [ -f "${ROOT_DIR}/third_party/sing-box/linux/sing-box" ]; then
+    install -m 755 "${ROOT_DIR}/third_party/sing-box/linux/sing-box" /usr/local/bin/sing-box
+fi
 
 echo "[3/4] Installing systemd service..."
 install -m 644 "${SCRIPT_DIR}/netfreedom-daemon.service" /etc/systemd/system/netfreedom-daemon.service

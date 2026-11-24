@@ -120,3 +120,46 @@ pub async fn register_warp_account(client: &reqwest::Client) -> anyhow::Result<W
         port: endpoint.port(),
     })
 }
+
+/// Retrieves an existing cached WARP account from disk, or registers a new one via Cloudflare's API.
+pub async fn get_or_register_warp_account() -> anyhow::Result<WarpConfig> {
+    let candidate_dirs = [
+        std::env::var("APPDATA").ok().map(|p| std::path::PathBuf::from(p).join("NetFreedom")),
+        std::env::var("LOCALAPPDATA").ok().map(|p| std::path::PathBuf::from(p).join("NetFreedom")),
+        std::env::var("HOME").ok().map(|p| std::path::PathBuf::from(p).join(".config").join("netfreedom")),
+        Some(std::env::temp_dir().join("NetFreedom")),
+    ];
+
+    for dir_opt in &candidate_dirs {
+        if let Some(dir) = dir_opt {
+            let file_path = dir.join("warp_account.json");
+            if file_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&file_path) {
+                    if let Ok(cfg) = serde_json::from_str::<WarpConfig>(&content) {
+                        return Ok(cfg);
+                    }
+                }
+            }
+        }
+    }
+
+    // Register fresh account
+    let client = reqwest::Client::new();
+    let config = register_warp_account(&client).await?;
+
+    // Cache to disk
+    for dir_opt in &candidate_dirs {
+        if let Some(dir) = dir_opt {
+            let _ = std::fs::create_dir_all(dir);
+            let file_path = dir.join("warp_account.json");
+            if let Ok(json_str) = serde_json::to_string_pretty(&config) {
+                if std::fs::write(&file_path, json_str).is_ok() {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(config)
+}
+

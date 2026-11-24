@@ -22,6 +22,7 @@ copy /Y "%SCRIPT_DIR%WinDivert.dll" "%INSTALL_DIR%\" >nul 2>nul
 copy /Y "%SCRIPT_DIR%WinDivert64.sys" "%INSTALL_DIR%\" >nul 2>nul
 copy /Y "%SCRIPT_DIR%netfreedom.exe" "%INSTALL_DIR%\" >nul 2>nul
 copy /Y "%SCRIPT_DIR%netfreedom-daemon.exe" "%INSTALL_DIR%\" >nul 2>nul
+copy /Y "%SCRIPT_DIR%sing-box.exe" "%INSTALL_DIR%\" >nul 2>nul
 copy /Y "%SCRIPT_DIR%wintun.dll" "%INSTALL_DIR%\" >nul 2>nul
 copy /Y "%SCRIPT_DIR%Uninstall.bat" "%INSTALL_DIR%\" >nul 2>nul
 

@@ -6,7 +6,7 @@ echo ==============================================
 echo.
 
 echo [*] Closing any active NetFreedom processes...
-taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe /IM netfreedom.exe /IM netfreedom-daemon.exe 2>nul
+taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe /IM sing-box.exe /IM netfreedom.exe /IM netfreedom-daemon.exe 2>nul
 
 echo [*] Restoring direct network connection (disabling proxy)...
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f >nul
