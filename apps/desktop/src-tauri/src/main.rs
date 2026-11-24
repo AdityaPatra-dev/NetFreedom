@@ -4,6 +4,19 @@
 use netfreedom_common::{ConnectionStatus, HealthMetrics};
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+fn win_cmd(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 #[tauri::command]
 fn get_connection_status() -> ConnectionStatus {
     #[cfg(target_os = "linux")]
@@ -29,7 +42,7 @@ fn get_connection_status() -> ConnectionStatus {
 
     #[cfg(target_os = "windows")]
     {
-        let reg_out = Command::new("reg")
+        let reg_out = win_cmd("reg")
             .args(&[
                 "query",
                 "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -43,7 +56,7 @@ fn get_connection_status() -> ConnectionStatus {
             false
         };
 
-        let tasklist_out = Command::new("tasklist").output();
+        let tasklist_out = win_cmd("tasklist").output();
         let is_running = if let Ok(out) = tasklist_out {
             String::from_utf8_lossy(&out.stdout).to_lowercase().contains("ciadpi")
         } else {
@@ -118,7 +131,11 @@ async fn connect_profile(mode: String) -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
+        let _ = win_cmd("taskkill")
+            .args(&["/F", "/IM", "ciadpi.exe"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
 
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
         let ciadpi_candidate = exe_dir.as_ref().map(|p| p.join("ciadpi.exe")).filter(|p| p.exists());
@@ -130,7 +147,7 @@ async fn connect_profile(mode: String) -> Result<String, String> {
             "third_party\\byedpi\\ciadpi.exe"
         };
 
-        let _ = Command::new(ciadpi_bin)
+        let _ = win_cmd(ciadpi_bin)
             .args(&[
                 "-i", "127.0.0.1",
                 "-p", "1080",
@@ -139,10 +156,13 @@ async fn connect_profile(mode: String) -> Result<String, String> {
                 "-f", "-1",
                 "-t", "3",
             ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn();
 
         // Enable Windows internet proxy via Registry
-        let _ = Command::new("reg")
+        let _ = win_cmd("reg")
             .args(&[
                 "add",
                 "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -154,8 +174,10 @@ async fn connect_profile(mode: String) -> Result<String, String> {
                 "1",
                 "/f",
             ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status();
-        let _ = Command::new("reg")
+        let _ = win_cmd("reg")
             .args(&[
                 "add",
                 "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -167,6 +189,8 @@ async fn connect_profile(mode: String) -> Result<String, String> {
                 "socks=127.0.0.1:1080",
                 "/f",
             ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status();
     }
 
@@ -185,7 +209,7 @@ async fn disconnect_profile() -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("reg")
+        let _ = win_cmd("reg")
             .args(&[
                 "add",
                 "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -197,8 +221,14 @@ async fn disconnect_profile() -> Result<String, String> {
                 "0",
                 "/f",
             ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status();
-        let _ = Command::new("taskkill").args(&["/F", "/IM", "ciadpi.exe"]).status();
+        let _ = win_cmd("taskkill")
+            .args(&["/F", "/IM", "ciadpi.exe"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     Ok("Disconnected".to_string())

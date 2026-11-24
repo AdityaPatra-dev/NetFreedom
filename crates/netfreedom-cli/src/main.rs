@@ -9,6 +9,19 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+fn win_cmd(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -80,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
 
             #[cfg(target_os = "windows")]
             {
-                let _ = std::process::Command::new("taskkill")
+                let _ = win_cmd("taskkill")
                     .args(&["/F", "/IM", "ciadpi.exe"])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
@@ -90,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     "third_party\\byedpi\\ciadpi.exe"
                 };
-                let _ = std::process::Command::new(ciadpi_bin)
+                let _ = win_cmd(ciadpi_bin)
                     .args(&[
                         "-i", "127.0.0.1",
                         "-p", "1080",
@@ -99,11 +112,12 @@ async fn main() -> anyhow::Result<()> {
                         "-f", "-1",
                         "-t", "3",
                     ])
+                    .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .spawn();
 
-                let _ = std::process::Command::new("reg")
+                let _ = win_cmd("reg")
                     .args(&[
                         "add",
                         "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -118,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
-                let _ = std::process::Command::new("reg")
+                let _ = win_cmd("reg")
                     .args(&[
                         "add",
                         "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -173,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
 
             #[cfg(target_os = "windows")]
             {
-                let _ = std::process::Command::new("reg")
+                let _ = win_cmd("reg")
                     .args(&[
                         "add",
                         "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
@@ -188,7 +202,7 @@ async fn main() -> anyhow::Result<()> {
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
-                let _ = std::process::Command::new("taskkill")
+                let _ = win_cmd("taskkill")
                     .args(&["/F", "/IM", "ciadpi.exe"])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
