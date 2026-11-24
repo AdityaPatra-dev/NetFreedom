@@ -349,7 +349,7 @@ async fn connect_profile(
             let (priv_key, _) = netfreedom_vpn::generate_warp_keypair();
             if let Ok(peer_pub_key) = netfreedom_vpn::decode_base64_key(netfreedom_vpn::CLOUDFLARE_WARP_PUBLIC_KEY) {
                 if let Ok(endpoint) = netfreedom_vpn::CLOUDFLARE_WARP_ANYCAST_ENDPOINT.parse() {
-                    if let Ok(adapter) = netfreedom_tun::WintunAdapter::create("NetFreedom", "Wintun") {
+                    if let Ok(adapter) = netfreedom_tun::WintunAdapter::create_or_open("NetFreedom", "Wintun") {
                         let (tun_tx, tun_rx, is_running) = adapter.start_io_bridge();
                         if let Ok(tunnel) = netfreedom_vpn::WireGuardTunnel::start(
                             priv_key,
