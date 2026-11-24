@@ -439,7 +439,24 @@ async fn connect_profile(
             .stderr(std::process::Stdio::null())
             .status();
 
-        // 5. Force Windows WinINet cache to refresh immediately (Chrome / Edge / Firefox)
+        // 5. Block outbound UDP 443 (QUIC / HTTP/3) so browsers automatically fall back to desynchronized TCP TLS 1.3
+        let _ = win_cmd("netsh")
+            .args(&[
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
+                "name=NetFreedom_Block_QUIC",
+                "dir=out",
+                "action=block",
+                "protocol=UDP",
+                "remoteport=443",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        // 6. Force Windows WinINet cache to refresh immediately (Chrome / Edge / Firefox)
         notify_wininet_proxy_change();
     }
 
@@ -475,6 +492,19 @@ async fn disconnect_profile() -> Result<String, String> {
             .status();
         let _ = win_cmd("taskkill")
             .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        // Remove outbound QUIC block rule
+        let _ = win_cmd("netsh")
+            .args(&[
+                "advfirewall",
+                "firewall",
+                "delete",
+                "rule",
+                "name=NetFreedom_Block_QUIC",
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
