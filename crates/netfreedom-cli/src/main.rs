@@ -87,21 +87,6 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 let _ = std::process::Command::new("gsettings")
-                    .args(&["set", "org.gnome.system.proxy.http", "host", "127.0.0.1"])
-                    .status();
-                let _ = std::process::Command::new("gsettings")
-                    .args(&["set", "org.gnome.system.proxy.http", "port", "1081"])
-                    .status();
-                let _ = std::process::Command::new("gsettings")
-                    .args(&["set", "org.gnome.system.proxy.http", "enabled", "true"])
-                    .status();
-                let _ = std::process::Command::new("gsettings")
-                    .args(&["set", "org.gnome.system.proxy.https", "host", "127.0.0.1"])
-                    .status();
-                let _ = std::process::Command::new("gsettings")
-                    .args(&["set", "org.gnome.system.proxy.https", "port", "1081"])
-                    .status();
-                let _ = std::process::Command::new("gsettings")
                     .args(&["set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"])
                     .status();
                 let _ = std::process::Command::new("gsettings")

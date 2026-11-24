@@ -62,6 +62,15 @@ struct TelemetryTracker {
 
 static TELEMETRY: Mutex<Option<TelemetryTracker>> = Mutex::new(None);
 
+#[cfg(target_os = "windows")]
+struct ActiveTunnelState {
+    wireguard: netfreedom_vpn::WireGuardTunnel,
+    is_running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_os = "windows")]
+static ACTIVE_TUNNEL: Mutex<Option<ActiveTunnelState>> = Mutex::new(None);
+
 #[tauri::command]
 fn get_connection_status() -> ConnectionStatus {
     #[cfg(target_os = "linux")]
@@ -270,7 +279,24 @@ async fn connect_profile(
         }
         args.push("-D".to_string());
 
-        let ciadpi_status = Command::new("./third_party/byedpi/ciadpi")
+        let mut candidates = vec![
+            std::path::PathBuf::from("/usr/local/bin/ciadpi"),
+            std::path::PathBuf::from("/usr/bin/ciadpi"),
+            std::path::PathBuf::from("./third_party/byedpi/ciadpi"),
+            std::path::PathBuf::from("ciadpi"),
+        ];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                candidates.push(parent.join("ciadpi"));
+                candidates.push(parent.join("third_party").join("byedpi").join("ciadpi"));
+            }
+        }
+        let ciadpi_bin = candidates
+            .into_iter()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| std::path::PathBuf::from("ciadpi"));
+
+        let ciadpi_status = Command::new(&ciadpi_bin)
             .args(&args)
             .status();
 
@@ -293,6 +319,18 @@ async fn connect_profile(
         let _ = Command::new("gsettings")
             .args(&["set", "org.gnome.system.proxy", "mode", "manual"])
             .status();
+
+        // If KDE Plasma environment is detected, update kioslaverc proxy
+        if let Ok(desktop) = std::env::var("XDG_CURRENT_DESKTOP") {
+            if desktop.to_lowercase().contains("kde") {
+                let _ = Command::new("kwriteconfig5")
+                    .args(&["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "1"])
+                    .status();
+                let _ = Command::new("kwriteconfig5")
+                    .args(&["--file", "kioslaverc", "--group", "Proxy Settings", "--key", "socksProxy", &format!("socks://127.0.0.1:{}", local_port)])
+                    .status();
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -306,7 +344,35 @@ async fn connect_profile(
 
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
 
-        // 2. If GoodbyeDPI is available and mode is dpi_desync or auto_pilot, spawn kernel engine
+        // 2. If WARP Shield mode is selected, initialize real BoringTun WireGuard + Wintun L3 adapter
+        if mode == "warp_shield" {
+            let (priv_key, _) = netfreedom_vpn::generate_warp_keypair();
+            if let Ok(peer_pub_key) = netfreedom_vpn::decode_base64_key(netfreedom_vpn::CLOUDFLARE_WARP_PUBLIC_KEY) {
+                if let Ok(endpoint) = netfreedom_vpn::CLOUDFLARE_WARP_ANYCAST_ENDPOINT.parse() {
+                    if let Ok(adapter) = netfreedom_tun::WintunAdapter::create("NetFreedom", "Wintun") {
+                        let (tun_tx, tun_rx, is_running) = adapter.start_io_bridge();
+                        if let Ok(tunnel) = netfreedom_vpn::WireGuardTunnel::start(
+                            priv_key,
+                            peer_pub_key,
+                            None,
+                            endpoint,
+                            tun_rx,
+                            tun_tx,
+                        ).await {
+                            let _ = netfreedom_tun::apply_double_slash_one_routes("NetFreedom", "192.168.1.1", "Ethernet", Some("188.114.96.1"));
+                            if let Ok(mut lock) = ACTIVE_TUNNEL.lock() {
+                                *lock = Some(ActiveTunnelState {
+                                    wireguard: tunnel,
+                                    is_running,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. If GoodbyeDPI is available and mode is dpi_desync or auto_pilot, spawn kernel engine with working directory
         if mode == "dpi_desync" || mode == "auto_pilot" || mode == "hybrid_stealth" {
             let mut gbdpi_candidates = Vec::new();
             if let Some(ref d) = exe_dir {
@@ -335,7 +401,11 @@ async fn connect_profile(
             gbdpi_candidates.push(std::path::PathBuf::from("goodbyedpi.exe"));
 
             if let Some(gbdpi_bin) = gbdpi_candidates.into_iter().find(|p| p.exists()) {
-                let _ = win_cmd(&gbdpi_bin)
+                let mut cmd = win_cmd(&gbdpi_bin);
+                if let Some(parent) = gbdpi_bin.parent() {
+                    cmd.current_dir(parent);
+                }
+                let _ = cmd
                     .args(&["-9"])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
@@ -344,7 +414,7 @@ async fn connect_profile(
             }
         }
 
-        // 3. Spawn ciadpi (ByeDPI SOCKS proxy) with customized parameters
+        // 4. Spawn ciadpi (ByeDPI SOCKS proxy) with customized parameters
         let mut candidates = Vec::new();
         if let Some(ref d) = exe_dir {
             candidates.push(d.join("ciadpi.exe"));
@@ -496,7 +566,16 @@ async fn disconnect_profile() -> Result<String, String> {
             .stderr(std::process::Stdio::null())
             .status();
 
-        // Remove outbound QUIC block rule
+        // 2. Tear down active WireGuard / Wintun tunnel if running
+        if let Ok(mut lock) = ACTIVE_TUNNEL.lock() {
+            if let Some(tunnel_state) = lock.take() {
+                tunnel_state.wireguard.stop();
+                tunnel_state.is_running.store(false, std::sync::atomic::Ordering::Relaxed);
+                let _ = netfreedom_tun::remove_double_slash_one_routes("NetFreedom", Some("188.114.96.1"));
+            }
+        }
+
+        // 3. Remove outbound QUIC block rule
         let _ = win_cmd("netsh")
             .args(&[
                 "advfirewall",

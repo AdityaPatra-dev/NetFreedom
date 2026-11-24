@@ -8,17 +8,14 @@ pub const WFP_RULE_PREFIX: &str = "NetFreedom_KillSwitch";
 
 /// Generates the PowerShell script to configure Windows Advanced Firewall (WFP) rules for the kill switch.
 pub fn generate_windows_firewall_script(
-    _tun_interface: &str,
+    tun_interface: &str,
     endpoint: Option<SocketAddr>,
     allow_lan: bool,
 ) -> String {
     let mut script = String::new();
 
-    // 1. Block all outbound by default on high priority rule
-    script.push_str(&format!(
-        "New-NetFirewallRule -DisplayName '{}_BlockAll' -Direction Outbound -Action Block -Profile Any;\n",
-        WFP_RULE_PREFIX
-    ));
+    // 1. Set default outbound action to Block so explicit Allow rules take priority
+    script.push_str("Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Block;\n");
 
     // 2. Allow Loopback
     script.push_str(&format!(
@@ -40,7 +37,13 @@ pub fn generate_windows_firewall_script(
         ));
     }
 
-    // 5. Allow VPN endpoint
+    // 5. Allow VPN tunnel interface
+    script.push_str(&format!(
+        "New-NetFirewallRule -DisplayName '{}_AllowTun' -Direction Outbound -Action Allow -InterfaceAlias '{}' -Profile Any;\n",
+        WFP_RULE_PREFIX, tun_interface
+    ));
+
+    // 6. Allow VPN endpoint
     if let Some(ep) = endpoint {
         script.push_str(&format!(
             "New-NetFirewallRule -DisplayName '{}_AllowEndpoint' -Direction Outbound -Action Allow -RemoteAddress '{}' -Protocol UDP -RemotePort {} -Profile Any;\n",
@@ -51,10 +54,10 @@ pub fn generate_windows_firewall_script(
     script
 }
 
-/// Generates the PowerShell script to remove the NetFreedom firewall rules.
+/// Generates the PowerShell script to remove the NetFreedom firewall rules and restore default outbound allowance.
 pub fn generate_windows_firewall_cleanup_script() -> String {
     format!(
-        "Get-NetFirewallRule -DisplayName '{}*' | Remove-NetFirewallRule;\n",
+        "Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Allow; Get-NetFirewallRule -DisplayName '{}*' | Remove-NetFirewallRule;\n",
         WFP_RULE_PREFIX
     )
 }
@@ -116,11 +119,13 @@ mod tests {
         let script = generate_windows_firewall_script("NetFreedomTUN", Some(ep), true);
 
         assert!(script.contains("New-NetFirewallRule"));
-        assert!(script.contains("NetFreedom_KillSwitch_BlockAll"));
+        assert!(script.contains("DefaultOutboundAction Block"));
+        assert!(script.contains("NetFreedom_KillSwitch_AllowTun"));
         assert!(script.contains("162.159.192.1"));
         assert!(script.contains("10.0.0.0/8"));
 
         let cleanup = generate_windows_firewall_cleanup_script();
+        assert!(cleanup.contains("DefaultOutboundAction Allow"));
         assert!(cleanup.contains("Remove-NetFirewallRule"));
     }
 }

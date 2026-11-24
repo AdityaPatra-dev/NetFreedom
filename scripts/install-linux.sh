@@ -16,13 +16,22 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-echo "[1/4] Building release binaries..."
+echo "[1/4] Building release binaries & ByeDPI engine..."
 cd "${ROOT_DIR}"
 cargo build --release -p netfreedom-cli -p netfreedom-daemon
+
+if [ -d "${ROOT_DIR}/third_party/byedpi" ]; then
+    echo "[*] Compiling native ByeDPI engine..."
+    cd "${ROOT_DIR}/third_party/byedpi"
+    gcc -O2 -I. -D_DEFAULT_SOURCE packets.c main.c conev.c proxy.c desync.c mpool.c extend.c -o ciadpi || true
+fi
 
 echo "[2/4] Installing binaries to /usr/local/bin..."
 install -m 755 "${ROOT_DIR}/target/release/netfreedom" /usr/local/bin/netfreedom
 install -m 755 "${ROOT_DIR}/target/release/netfreedom-daemon" /usr/local/bin/netfreedom-daemon
+if [ -f "${ROOT_DIR}/third_party/byedpi/ciadpi" ]; then
+    install -m 755 "${ROOT_DIR}/third_party/byedpi/ciadpi" /usr/local/bin/ciadpi
+fi
 
 echo "[3/4] Installing systemd service..."
 install -m 644 "${SCRIPT_DIR}/netfreedom-daemon.service" /etc/systemd/system/netfreedom-daemon.service

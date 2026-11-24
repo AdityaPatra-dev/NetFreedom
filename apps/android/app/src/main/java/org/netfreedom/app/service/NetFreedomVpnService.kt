@@ -114,6 +114,8 @@ class NetFreedomVpnService : VpnService() {
                     .setSession("NetFreedom - ${mode.label}")
                     .addAddress("172.16.0.2", 32)
                     .addRoute("0.0.0.0", 0)
+                    .addAddress("fd00::1", 128)
+                    .addRoute("::", 0)
                     .addDnsServer("198.18.0.2")
                     .setMtu(1420)
                     .setBlocking(false)

@@ -16,6 +16,16 @@ struct RegistrationRequest<'a> {
     locale: &'a str,
 }
 
+pub const CLOUDFLARE_WARP_ANYCAST_ENDPOINT: &str = "188.114.96.1:2408";
+pub const CLOUDFLARE_WARP_PUBLIC_KEY: &str = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=";
+
+/// Generates a local Curve25519 keypair for WireGuard tunneling.
+pub fn generate_warp_keypair() -> ([u8; 32], [u8; 32]) {
+    let secret = StaticSecret::random_from_rng(OsRng);
+    let public = PublicKey::from(&secret);
+    (secret.to_bytes(), *public.as_bytes())
+}
+
 /// Registers an anonymous Cloudflare WARP account via their client API,
 /// generating a Curve25519 keypair and retrieving WireGuard credentials.
 pub async fn register_warp_account(client: &reqwest::Client) -> anyhow::Result<WarpConfig> {
@@ -87,9 +97,9 @@ pub async fn register_warp_account(client: &reqwest::Client) -> anyhow::Result<W
         .or_else(|| resp_val["result"]["config"]["peers"][0].as_object())
         .ok_or_else(|| anyhow::anyhow!("No peers found in response: {}", resp_val))?;
 
-    let peer_public_key = peer["public_key"].as_str().unwrap_or("").to_string();
-    let endpoint_str = peer["endpoint"]["v4"].as_str().unwrap_or("162.159.192.1:2408");
-    let endpoint: SocketAddr = endpoint_str.parse().unwrap_or_else(|_| "162.159.192.1:2408".parse().unwrap());
+    let peer_public_key = peer["public_key"].as_str().unwrap_or(CLOUDFLARE_WARP_PUBLIC_KEY).to_string();
+    // Default to the campus-accessible Anycast edge 188.114.96.1:2408 to defeat 162.159.0.0/16 blackholes
+    let endpoint: SocketAddr = CLOUDFLARE_WARP_ANYCAST_ENDPOINT.parse().unwrap();
 
     let iface = resp_val["config"]["interface"]
         .as_object()

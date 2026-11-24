@@ -5,8 +5,8 @@ use tracing::info;
 
 pub const NRPT_RULE_NAME: &str = "NetFreedomDNS";
 
-/// Generates the PowerShell script to enforce the Name Resolution Policy Table (NRPT) rule on Windows.
-/// This prevents Smart Multi-Homed Name Resolution (SMHNR) from leaking DNS queries to physical adapters.
+/// Generates the PowerShell script to enforce encrypted DNS on Windows:
+/// Uses NRPT on Windows Pro/Enterprise, and falls back to Set-DnsClientServerAddress on Windows Home.
 pub fn generate_nrpt_enable_script(dns_servers: &[&str]) -> String {
     let servers_formatted = dns_servers
         .iter()
@@ -15,15 +15,23 @@ pub fn generate_nrpt_enable_script(dns_servers: &[&str]) -> String {
         .join(",");
 
     format!(
-        "Add-DnsClientNrptRule -Namespace '.' -NameServers @({}) -DisplayName '{}'",
-        servers_formatted, NRPT_RULE_NAME
+        "if (Get-Command Add-DnsClientNrptRule -ErrorAction SilentlyContinue) {{ \
+            Add-DnsClientNrptRule -Namespace '.' -NameServers @({}) -DisplayName '{}' \
+        }} else {{ \
+            Get-NetAdapter | Where-Object {{ $_.Status -eq 'Up' }} | Set-DnsClientServerAddress -ServerAddresses @({}) \
+        }}",
+        servers_formatted, NRPT_RULE_NAME, servers_formatted
     )
 }
 
-/// Generates the PowerShell script to remove the NetFreedom NRPT rule.
+/// Generates the PowerShell script to restore standard DNS settings on Windows.
 pub fn generate_nrpt_disable_script() -> String {
     format!(
-        "Get-DnsClientNrptRule | Where-Object {{ $_.DisplayName -eq '{}' }} | Remove-DnsClientNrptRule -Force",
+        "if (Get-Command Remove-DnsClientNrptRule -ErrorAction SilentlyContinue) {{ \
+            Get-DnsClientNrptRule | Where-Object {{ $_.DisplayName -eq '{}' }} | Remove-DnsClientNrptRule -Force -ErrorAction SilentlyContinue \
+        }} else {{ \
+            Get-NetAdapter | Where-Object {{ $_.Status -eq 'Up' }} | Set-DnsClientServerAddress -ResetServerAddresses \
+        }}",
         NRPT_RULE_NAME
     )
 }

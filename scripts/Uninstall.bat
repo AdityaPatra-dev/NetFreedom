@@ -10,6 +10,7 @@ taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe /IM netfree
 
 echo [*] Restoring direct network connection (disabling proxy)...
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f >nul
+netsh advfirewall firewall delete rule name="NetFreedom_Block_QUIC" >nul 2>nul
 powershell -NoProfile -Command "$sig = '[DllImport(\"wininet.dll\")] public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);'; $w = Add-Type -MemberDefinition $sig -Name 'W' -Namespace 'N' -PassThru; $w::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0); $w::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)" 2>nul
 
 echo [*] Removing Desktop shortcut...

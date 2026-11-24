@@ -31,6 +31,7 @@ if ($Uninstall) {
 
     # Reset System Proxy in Registry
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f | Out-Null
+    netsh advfirewall firewall delete rule name="NetFreedom_Block_QUIC" 2>$null | Out-Null
 
     # Remove Desktop Shortcut
     $DesktopPath = [Environment]::GetFolderPath("CommonDesktopDirectory")
@@ -91,7 +92,14 @@ try {
     $Shortcut.WorkingDirectory = "$InstallPath"
     $Shortcut.Description = "NetFreedom Desktop GUI"
     $Shortcut.Save()
-    Write-Host "[+] Created Desktop shortcut: NetFreedom"
+    # Set Run as Administrator byte on shortcut (offset 21 |= 0x20)
+    $lnkPath = "$DesktopPath\NetFreedom.lnk"
+    if (Test-Path $lnkPath) {
+        $bytes = [System.IO.File]::ReadAllBytes($lnkPath)
+        $bytes[21] = $bytes[21] -bor 0x20
+        [System.IO.File]::WriteAllBytes($lnkPath, $bytes)
+    }
+    Write-Host "[+] Created Elevated Desktop shortcut: NetFreedom"
 } catch {
     Write-Warning "Could not create desktop shortcut: $_"
 }

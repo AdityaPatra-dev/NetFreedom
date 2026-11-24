@@ -125,7 +125,7 @@ object NetFreedomNative {
             socks5:
               port: $socksPort
               address: '$socksHost'
-              udp: 'udp'
+              udp: 'drop'
             
             mapdns:
               address: 198.18.0.2
