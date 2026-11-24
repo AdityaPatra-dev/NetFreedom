@@ -10,7 +10,6 @@ tauri-build = { version = "2.0" }
 
 [dependencies]
 netfreedom-common = { path = "../../../crates/netfreedom-common" }
-netfreedom-daemon = { path = "../../../crates/netfreedom-daemon" }
 netfreedom-health = { path = "../../../crates/netfreedom-health" }
 netfreedom-vpn = { path = "../../../crates/netfreedom-vpn" }
 netfreedom-tun = { path = "../../../crates/netfreedom-tun" }

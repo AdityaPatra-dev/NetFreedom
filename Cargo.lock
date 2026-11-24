@@ -808,7 +808,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "netfreedom-common",
- "netfreedom-daemon",
  "netfreedom-dns",
  "netfreedom-dpi",
  "netfreedom-health",
