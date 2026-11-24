@@ -109,6 +109,11 @@ jobs:
           Copy-Item "target\release\netfreedom-daemon.exe" "dist\$DirName\"
           Copy-Item "target\release\wintun.dll" "dist\$DirName\"
           Copy-Item "target\release\ciadpi.exe" "dist\$DirName\"
+          if (Test-Path "third_party\goodbyedpi\goodbyedpi.exe") {
+            Copy-Item "third_party\goodbyedpi\goodbyedpi.exe" "dist\$DirName\"
+            Copy-Item "third_party\goodbyedpi\WinDivert.dll" "dist\$DirName\"
+            Copy-Item "third_party\goodbyedpi\WinDivert64.sys" "dist\$DirName\"
+          }
           Copy-Item "scripts\install-windows.ps1" "dist\$DirName\"
           Copy-Item "scripts\Install.bat" "dist\$DirName\"
           Copy-Item "scripts\Uninstall.bat" "dist\$DirName\"

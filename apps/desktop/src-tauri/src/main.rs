@@ -17,6 +17,29 @@ fn win_cmd(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+#[cfg(target_os = "windows")]
+fn notify_wininet_proxy_change() {
+    unsafe {
+        type InternetSetOptionWFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut std::ffi::c_void, u32) -> i32;
+        extern "system" {
+            fn LoadLibraryA(lpLibFileName: *const i8) -> *mut std::ffi::c_void;
+            fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
+        }
+
+        let h_wininet = LoadLibraryA(b"wininet.dll\0".as_ptr() as *const i8);
+        if !h_wininet.is_null() {
+            let proc = GetProcAddress(h_wininet, b"InternetSetOptionW\0".as_ptr() as *const i8);
+            if !proc.is_null() {
+                let func: InternetSetOptionWFn = std::mem::transmute(proc);
+                // INTERNET_OPTION_SETTINGS_CHANGED = 39
+                func(std::ptr::null_mut(), 39, std::ptr::null_mut(), 0);
+                // INTERNET_OPTION_REFRESH = 37
+                func(std::ptr::null_mut(), 37, std::ptr::null_mut(), 0);
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn get_connection_status() -> ConnectionStatus {
     #[cfg(target_os = "linux")]
@@ -42,28 +65,15 @@ fn get_connection_status() -> ConnectionStatus {
 
     #[cfg(target_os = "windows")]
     {
-        let reg_out = win_cmd("reg")
-            .args(&[
-                "query",
-                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-                "/v",
-                "ProxyEnable",
-            ])
-            .output();
-        let is_proxy_enabled = if let Ok(out) = reg_out {
-            String::from_utf8_lossy(&out.stdout).contains("0x1")
-        } else {
-            false
-        };
-
         let tasklist_out = win_cmd("tasklist").output();
         let is_running = if let Ok(out) = tasklist_out {
-            String::from_utf8_lossy(&out.stdout).to_lowercase().contains("ciadpi")
+            let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            s.contains("ciadpi") || s.contains("goodbyedpi")
         } else {
             false
         };
 
-        if is_running && is_proxy_enabled {
+        if is_running {
             ConnectionStatus::Connected
         } else {
             ConnectionStatus::Disconnected
@@ -132,12 +142,41 @@ async fn connect_profile(mode: String) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         let _ = win_cmd("taskkill")
-            .args(&["/F", "/IM", "ciadpi.exe"])
+            .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
 
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+
+        // 1. Check for and spawn GoodbyeDPI (WinDivert kernel engine)
+        let mut gbdpi_candidates = Vec::new();
+        if let Some(ref d) = exe_dir {
+            gbdpi_candidates.push(d.join("goodbyedpi.exe"));
+            gbdpi_candidates.push(d.join("third_party").join("goodbyedpi").join("goodbyedpi.exe"));
+        }
+        if let Ok(cur) = std::env::current_dir() {
+            gbdpi_candidates.push(cur.join("goodbyedpi.exe"));
+            gbdpi_candidates.push(cur.join("third_party").join("goodbyedpi").join("goodbyedpi.exe"));
+        }
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            gbdpi_candidates.push(std::path::PathBuf::from(local_app_data).join("Programs").join("NetFreedom").join("goodbyedpi.exe"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            gbdpi_candidates.push(std::path::PathBuf::from(prog_files).join("NetFreedom").join("goodbyedpi.exe"));
+        }
+        gbdpi_candidates.push(std::path::PathBuf::from("goodbyedpi.exe"));
+
+        if let Some(gbdpi_bin) = gbdpi_candidates.into_iter().find(|p| p.exists()) {
+            let _ = win_cmd(&gbdpi_bin)
+                .args(&["-9"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+
+        // 2. Check for and spawn ciadpi (ByeDPI SOCKS proxy with Fake SNI)
         let mut candidates = Vec::new();
         if let Some(ref d) = exe_dir {
             candidates.push(d.join("ciadpi.exe"));
@@ -153,35 +192,25 @@ async fn connect_profile(mode: String) -> Result<String, String> {
         }
         candidates.push(std::path::PathBuf::from("ciadpi.exe"));
 
-        let ciadpi_bin = candidates.into_iter().find(|p| p.exists());
-        let ciadpi_bin = match ciadpi_bin {
-            Some(p) => p,
-            None => {
-                return Err("ciadpi.exe not found! Please extract all files from the ZIP or run Install.bat.".to_string());
-            }
-        };
-
-        let child = win_cmd(&ciadpi_bin)
-            .args(&[
-                "-i", "127.0.0.1",
-                "-p", "1080",
-                "-I", "0.0.0.0",
-                "-s", "2+s",
-                "-f", "-1",
-                "-t", "3",
-            ])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-
-        if let Err(e) = child {
-            return Err(format!("Failed to start ciadpi.exe: {}. Check Windows Defender permissions.", e));
+        if let Some(ciadpi_bin) = candidates.into_iter().find(|p| p.exists()) {
+            let _ = win_cmd(&ciadpi_bin)
+                .args(&[
+                    "-i", "127.0.0.1",
+                    "-p", "1080",
+                    "-I", "0.0.0.0",
+                    "-s", "2+s",
+                    "-f", "-1",
+                    "-n", "www.google.com",
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-        // Enable Windows internet proxy via Registry
+        // 3. Enable Windows internet proxy via Registry
         let _ = win_cmd("reg")
             .args(&[
                 "add",
@@ -212,6 +241,9 @@ async fn connect_profile(mode: String) -> Result<String, String> {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+
+        // 4. Force Windows WinINet cache to refresh immediately (Chrome / Edge / Firefox)
+        notify_wininet_proxy_change();
     }
 
     Ok(format!("Connected via mode: {}", mode))
@@ -245,10 +277,13 @@ async fn disconnect_profile() -> Result<String, String> {
             .stderr(std::process::Stdio::null())
             .status();
         let _ = win_cmd("taskkill")
-            .args(&["/F", "/IM", "ciadpi.exe"])
+            .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+
+        // Force Windows WinINet cache to refresh immediately
+        notify_wininet_proxy_change();
     }
 
     Ok("Disconnected".to_string())

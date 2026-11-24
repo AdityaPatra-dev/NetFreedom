@@ -22,6 +22,27 @@ fn win_cmd(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
     cmd
 }
 
+#[cfg(target_os = "windows")]
+fn notify_wininet_proxy_change() {
+    unsafe {
+        type InternetSetOptionWFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut std::ffi::c_void, u32) -> i32;
+        extern "system" {
+            fn LoadLibraryA(lpLibFileName: *const i8) -> *mut std::ffi::c_void;
+            fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
+        }
+
+        let h_wininet = LoadLibraryA(b"wininet.dll\0".as_ptr() as *const i8);
+        if !h_wininet.is_null() {
+            let proc = GetProcAddress(h_wininet, b"InternetSetOptionW\0".as_ptr() as *const i8);
+            if !proc.is_null() {
+                let func: InternetSetOptionWFn = std::mem::transmute(proc);
+                func(std::ptr::null_mut(), 39, std::ptr::null_mut(), 0);
+                func(std::ptr::null_mut(), 37, std::ptr::null_mut(), 0);
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -94,10 +115,28 @@ async fn main() -> anyhow::Result<()> {
             #[cfg(target_os = "windows")]
             {
                 let _ = win_cmd("taskkill")
-                    .args(&["/F", "/IM", "ciadpi.exe"])
+                    .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
+
+                // Spawn GoodbyeDPI if present
+                let gbdpi_bin = if std::path::Path::new("goodbyedpi.exe").exists() {
+                    Some("goodbyedpi.exe")
+                } else if std::path::Path::new("third_party\\goodbyedpi\\goodbyedpi.exe").exists() {
+                    Some("third_party\\goodbyedpi\\goodbyedpi.exe")
+                } else {
+                    None
+                };
+                if let Some(bin) = gbdpi_bin {
+                    let _ = win_cmd(bin)
+                        .args(&["-9"])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
+                }
+
                 let ciadpi_bin = if std::path::Path::new("ciadpi.exe").exists() {
                     "ciadpi.exe"
                 } else {
@@ -110,7 +149,7 @@ async fn main() -> anyhow::Result<()> {
                         "-I", "0.0.0.0",
                         "-s", "2+s",
                         "-f", "-1",
-                        "-t", "3",
+                        "-n", "www.google.com",
                     ])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
@@ -147,6 +186,8 @@ async fn main() -> anyhow::Result<()> {
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
+
+                notify_wininet_proxy_change();
             }
 
             // Notify local desktop server if running
@@ -203,10 +244,11 @@ async fn main() -> anyhow::Result<()> {
                     .stderr(std::process::Stdio::null())
                     .status();
                 let _ = win_cmd("taskkill")
-                    .args(&["/F", "/IM", "ciadpi.exe"])
+                    .args(&["/F", "/IM", "ciadpi.exe", "/IM", "goodbyedpi.exe"])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
+                notify_wininet_proxy_change();
             }
 
             println!("[+] NetFreedom Bypass deactivated. System returned to direct network mode.");
