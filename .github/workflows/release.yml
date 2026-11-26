@@ -174,11 +174,18 @@ jobs:
           Compress-Archive -Path "dist\$DirName" -DestinationPath "dist\$DirName.zip"
           Get-FileHash "dist\$DirName.zip" -Algorithm SHA256 | Out-File "dist\$DirName.zip.sha256"
 
+          # Detect and package Tauri NSIS / MSI installers if generated
+          Get-ChildItem -Path "apps\desktop" -Recurse -Include "*setup*.exe", "*.msi" | ForEach-Object {
+            Write-Host "Found installer package: $($_.FullName)"
+            Copy-Item $_.FullName "dist\NetFreedom-Setup-$Tag.exe" -Force -ErrorAction SilentlyContinue
+            Get-FileHash "dist\NetFreedom-Setup-$Tag.exe" -Algorithm SHA256 | Out-File "dist\NetFreedom-Setup-$Tag.exe.sha256" -ErrorAction SilentlyContinue
+          }
+
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: netfreedom-windows-x86_64
-          path: dist/*.zip*
+          path: dist/*
 
   # --------------------------------------------------------------------------
   # 3. Apple (iOS & macOS) Frameworks Release

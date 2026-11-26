@@ -550,13 +550,25 @@ async fn connect_profile(
         .unwrap_or_default();
     let stealth_outbound = node_to_vless_outbound(&active_stealth_node);
 
+    // If auto_pilot mode is selected, run the adaptive network ladder to determine the optimal mode
+    let effective_mode = if mode == "auto_pilot" {
+        let probe = netfreedom_health::evaluate_autopilot_mode().await;
+        match probe.recommended_mode {
+            netfreedom_common::OperatingMode::StealthTunnel => "stealth_tunnel".to_string(),
+            netfreedom_common::OperatingMode::WarpShield => "warp_shield".to_string(),
+            _ => "dpi_desync".to_string(),
+        }
+    } else {
+        mode.clone()
+    };
+
     #[cfg(target_os = "linux")]
     {
         // 1. Terminate existing engine processes cleanly
         let _ = Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
         let _ = Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
 
-        if mode == "stealth_tunnel" {
+        if effective_mode == "stealth_tunnel" {
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary not found on system.".to_string())?;
 
@@ -573,7 +585,7 @@ async fn connect_profile(
                 .spawn()
                 .map_err(|e| format!("Failed to start Sing-Box Stealth Tunnel: {}", e))?;
 
-        } else if mode == "warp_shield" {
+        } else if effective_mode == "warp_shield" {
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary not found on system.".to_string())?;
 
@@ -700,7 +712,7 @@ async fn connect_profile(
         let has_admin = is_admin();
         let enable_tun = has_admin;
 
-        if mode == "stealth_tunnel" {
+        if effective_mode == "stealth_tunnel" {
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
@@ -720,7 +732,7 @@ async fn connect_profile(
                 .spawn()
                 .map_err(|e| format!("Failed to start Sing-Box Stealth Tunnel: {}", e))?;
 
-        } else if mode == "warp_shield" {
+        } else if effective_mode == "warp_shield" {
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 

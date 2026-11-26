@@ -135,6 +135,31 @@ impl NetFreedomOrchestrator {
     /// Connects to a complete ConnectionProfile dispatching by operating mode.
     pub async fn connect_profile_direct(&mut self, profile: ConnectionProfile) -> Result<()> {
         match profile.mode {
+            OperatingMode::AutoPilot => {
+                info!("Auto-Pilot mode requested. Running empirical network diagnostic ladder...");
+                let report = netfreedom_health::evaluate_autopilot_mode().await;
+                info!("Auto-Pilot ladder decision: {:?} (reason: {})", report.recommended_mode, report.reason);
+                match report.recommended_mode {
+                    OperatingMode::StealthTunnel => {
+                        let node = profile.stealth_config.clone().unwrap_or_default();
+                        self.connect_stealth(node, format!("Auto-Pilot ({})", profile.name), profile.kill_switch_enabled).await?;
+                    }
+                    OperatingMode::WarpShield => {
+                        let cfg = match profile.warp_config.clone() {
+                            Some(c) => c,
+                            None => {
+                                netfreedom_vpn::get_or_register_warp_account().await?
+                            }
+                        };
+                        self.connect_warp(cfg, format!("Auto-Pilot ({})", profile.name), profile.kill_switch_enabled).await?;
+                    }
+                    OperatingMode::DpiDesync | _ => {
+                        let dpi_cfg = profile.dpi_config.clone().unwrap_or_default();
+                        let ciadpi_path = PathBuf::from("./third_party/byedpi/ciadpi");
+                        self.connect_dpi(dpi_cfg, ciadpi_path, format!("Auto-Pilot ({})", profile.name)).await?;
+                    }
+                }
+            }
             OperatingMode::StealthTunnel => {
                 let node = profile.stealth_config.clone().unwrap_or_default();
                 self.connect_stealth(node, profile.name.clone(), profile.kill_switch_enabled).await?;

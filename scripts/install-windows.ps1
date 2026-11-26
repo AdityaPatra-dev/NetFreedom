@@ -3,11 +3,11 @@
     NetFreedom Windows Desktop & Service Installation Script
 .DESCRIPTION
     Installs NetFreedom Windows GUI application, background service, drivers,
-    and command-line utilities.
+    and command-line utilities. Supports both Administrator and Standard user installations.
 #>
 
 param(
-    [string]$InstallPath = "$env:ProgramFiles\NetFreedom",
+    [string]$InstallPath = "",
     [switch]$Uninstall
 )
 
@@ -18,32 +18,53 @@ function Check-Administrator {
     return $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-if (-not (Check-Administrator)) {
-    Write-Error "[-] This script must be run as Administrator in PowerShell."
-    exit 1
+$IsAdmin = Check-Administrator
+
+if (-not $InstallPath) {
+    if ($IsAdmin) {
+        $InstallPath = "$env:ProgramFiles\NetFreedom"
+    } else {
+        $InstallPath = "$env:LOCALAPPDATA\Programs\NetFreedom"
+    }
 }
 
 if ($Uninstall) {
     Write-Host "[+] Stopping NetFreedom processes and services..."
-    Stop-Service -Name "NetFreedomDaemon" -ErrorAction SilentlyContinue
-    sc.exe delete "NetFreedomDaemon" | Out-Null
-    taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe /IM sing-box.exe 2>$null | Out-Null
+    if ($IsAdmin) {
+        Stop-Service -Name "NetFreedomDaemon" -ErrorAction SilentlyContinue
+        sc.exe delete "NetFreedomDaemon" 2>$null | Out-Null
+        netsh advfirewall firewall delete rule name="NetFreedom_Block_QUIC" 2>$null | Out-Null
+    }
+    taskkill /F /IM NetFreedom-GUI.exe /IM ciadpi.exe /IM goodbyedpi.exe /IM sing-box.exe /IM netfreedom.exe /IM netfreedom-daemon.exe 2>$null | Out-Null
 
     # Reset System Proxy in Registry
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f | Out-Null
-    netsh advfirewall firewall delete rule name="NetFreedom_Block_QUIC" 2>$null | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f 2>$null | Out-Null
+    
+    # Flush WinINet proxy cache in memory
+    try {
+        $sig = '[DllImport("wininet.dll")] public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);'
+        $w = Add-Type -MemberDefinition $sig -Name 'WNet' -Namespace 'NetFreedom' -PassThru
+        $w::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
+        $w::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
+    } catch {}
 
-    # Remove Desktop Shortcut
-    $DesktopPath = [Environment]::GetFolderPath("CommonDesktopDirectory")
-    if (Test-Path "$DesktopPath\NetFreedom.lnk") {
-        Remove-Item "$DesktopPath\NetFreedom.lnk" -Force
+    # Remove Desktop Shortcuts
+    $DesktopPaths = @(
+        [Environment]::GetFolderPath("CommonDesktopDirectory"),
+        [Environment]::GetFolderPath("Desktop")
+    )
+    foreach ($dp in $DesktopPaths) {
+        if (Test-Path "$dp\NetFreedom.lnk") {
+            Remove-Item "$dp\NetFreedom.lnk" -Force -ErrorAction SilentlyContinue
+        }
     }
 
-    # Remove from System PATH
-    $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    # Remove from System or User PATH
+    $TargetEnv = if ($IsAdmin) { "Machine" } else { "User" }
+    $CurrentPath = [Environment]::GetEnvironmentVariable("Path", $TargetEnv)
     if ($CurrentPath -like "*$InstallPath*") {
         $NewPath = ($CurrentPath.Split(';') | Where-Object { $_ -ne $InstallPath -and $_ -ne "" }) -join ';'
-        [Environment]::SetEnvironmentVariable("Path", $NewPath, "Machine")
+        [Environment]::SetEnvironmentVariable("Path", $NewPath, $TargetEnv)
     }
 
     # Remove Install Directory
@@ -56,6 +77,11 @@ if ($Uninstall) {
 }
 
 Write-Host "=== NetFreedom Windows Installer ==="
+if ($IsAdmin) {
+    Write-Host "[*] Running with Administrative privileges (System-wide install)."
+} else {
+    Write-Host "[*] Running as Standard User (Per-user install without UAC requirement)."
+}
 
 # 1. Create directory
 if (-not (Test-Path $InstallPath)) {
@@ -66,52 +92,88 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # 2. Copy binaries
 Write-Host "[+] Copying binaries to $InstallPath..."
-Copy-Item "$ScriptDir\netfreedom.exe" -Destination "$InstallPath\netfreedom.exe" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\NetFreedom-GUI.exe" -Destination "$InstallPath\NetFreedom-GUI.exe" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\ciadpi.exe" -Destination "$InstallPath\ciadpi.exe" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\goodbyedpi.exe" -Destination "$InstallPath\goodbyedpi.exe" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\WinDivert.dll" -Destination "$InstallPath\WinDivert.dll" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\WinDivert64.sys" -Destination "$InstallPath\WinDivert64.sys" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\netfreedom-daemon.exe" -Destination "$InstallPath\netfreedom-daemon.exe" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\sing-box.exe" -Destination "$InstallPath\sing-box.exe" -Force -ErrorAction SilentlyContinue
-Copy-Item "$ScriptDir\wintun.dll" -Destination "$InstallPath\wintun.dll" -Force -ErrorAction SilentlyContinue
+$Binaries = @(
+    "netfreedom.exe",
+    "NetFreedom-GUI.exe",
+    "ciadpi.exe",
+    "goodbyedpi.exe",
+    "WinDivert.dll",
+    "WinDivert64.sys",
+    "netfreedom-daemon.exe",
+    "sing-box.exe",
+    "wintun.dll",
+    "Uninstall.bat"
+)
+foreach ($bin in $Binaries) {
+    if (Test-Path "$ScriptDir\$bin") {
+        Copy-Item "$ScriptDir\$bin" -Destination "$InstallPath\$bin" -Force -ErrorAction SilentlyContinue
+    }
+}
 Get-ChildItem -Path $InstallPath -Recurse | Unblock-File -ErrorAction SilentlyContinue
 
-# 3. Add to system PATH
-$CurrentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-if ($CurrentPath -notlike "*$InstallPath*") {
-    [Environment]::SetEnvironmentVariable("Path", "$CurrentPath;$InstallPath", "Machine")
-    Write-Host "[+] Added $InstallPath to system PATH."
+# 3. Verify Microsoft Edge WebView2 Runtime
+Write-Host "[+] Checking Microsoft Edge WebView2 Runtime..."
+$WebViewFound = $false
+$WebViewKeys = @(
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-F501-47DD-8A04-6876D2EBE2C2}",
+    "HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-F501-47DD-8A04-6876D2EBE2C2}"
+)
+foreach ($key in $WebViewKeys) {
+    if (Test-Path $key) {
+        $pv = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+        if ($pv) {
+            $WebViewFound = $true
+            break
+        }
+    }
+}
+if (-not $WebViewFound) {
+    Write-Host "[!] Microsoft Edge WebView2 not detected. Downloading bootstrapper..."
+    $WvInstaller = "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
+    Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $WvInstaller
+    Start-Process $WvInstaller -ArgumentList '/silent /install' -Wait
+    Write-Host "[+] Microsoft Edge WebView2 provisioned."
 }
 
-# 4. Create Desktop Shortcut for NetFreedom-GUI
+# 4. Add to PATH
+$TargetEnv = if ($IsAdmin) { "Machine" } else { "User" }
+$CurrentPath = [Environment]::GetEnvironmentVariable("Path", $TargetEnv)
+if ($CurrentPath -notlike "*$InstallPath*") {
+    [Environment]::SetEnvironmentVariable("Path", "$CurrentPath;$InstallPath", $TargetEnv)
+    Write-Host "[+] Added $InstallPath to $TargetEnv PATH."
+}
+
+# 5. Create Desktop Shortcut for NetFreedom-GUI
 try {
     $WshShell = New-Object -ComObject WScript.Shell
-    $DesktopPath = [Environment]::GetFolderPath("CommonDesktopDirectory")
+    $DesktopPath = if ($IsAdmin) { [Environment]::GetFolderPath("CommonDesktopDirectory") } else { [Environment]::GetFolderPath("Desktop") }
     $Shortcut = $WshShell.CreateShortcut("$DesktopPath\NetFreedom.lnk")
     $Shortcut.TargetPath = "$InstallPath\NetFreedom-GUI.exe"
     $Shortcut.WorkingDirectory = "$InstallPath"
-    $Shortcut.Description = "NetFreedom Desktop GUI"
+    $Shortcut.Description = "NetFreedom Universal Censorship Circumvention Suite"
     $Shortcut.Save()
-    # Set Run as Administrator byte on shortcut (offset 21 |= 0x20)
-    $lnkPath = "$DesktopPath\NetFreedom.lnk"
-    if (Test-Path $lnkPath) {
-        $bytes = [System.IO.File]::ReadAllBytes($lnkPath)
-        $bytes[21] = $bytes[21] -bor 0x20
-        [System.IO.File]::WriteAllBytes($lnkPath, $bytes)
+
+    if ($IsAdmin) {
+        # Mark shortcut as Run as Administrator if elevated
+        $lnkPath = "$DesktopPath\NetFreedom.lnk"
+        if (Test-Path $lnkPath) {
+            $bytes = [System.IO.File]::ReadAllBytes($lnkPath)
+            $bytes[21] = $bytes[21] -bor 0x20
+            [System.IO.File]::WriteAllBytes($lnkPath, $bytes)
+        }
     }
-    Write-Host "[+] Created Elevated Desktop shortcut: NetFreedom"
+    Write-Host "[+] Created Desktop shortcut: NetFreedom"
 } catch {
     Write-Warning "Could not create desktop shortcut: $_"
 }
 
-# 5. Create Windows Service
-Write-Host "[+] Registering Windows Service 'NetFreedomDaemon'..."
-sc.exe create "NetFreedomDaemon" binPath= "`"$InstallPath\netfreedom-daemon.exe`"" start= auto DisplayName= "NetFreedom Network Service" | Out-Null
-sc.exe description "NetFreedomDaemon" "NetFreedom Multi-Mode Privacy and Network Engine" | Out-Null
-
-# 6. Start service
-Start-Service -Name "NetFreedomDaemon" -ErrorAction SilentlyContinue
+# 6. Create Windows Service (Only if Administrator)
+if ($IsAdmin -and (Test-Path "$InstallPath\netfreedom-daemon.exe")) {
+    Write-Host "[+] Registering Windows Service 'NetFreedomDaemon'..."
+    sc.exe create "NetFreedomDaemon" binPath= "`"$InstallPath\netfreedom-daemon.exe`"" start= auto DisplayName= "NetFreedom Network Service" 2>$null | Out-Null
+    sc.exe description "NetFreedomDaemon" "NetFreedom Multi-Mode Privacy and Network Engine" 2>$null | Out-Null
+    Start-Service -Name "NetFreedomDaemon" -ErrorAction SilentlyContinue
+}
 
 Write-Host "=== NetFreedom Windows Installation Complete! ==="
-Write-Host "You can now run 'NetFreedom' from your Desktop or 'netfreedom' in any terminal."
+Write-Host "You can now run 'NetFreedom' from your Desktop or 'netfreedom' in PowerShell/CMD."
