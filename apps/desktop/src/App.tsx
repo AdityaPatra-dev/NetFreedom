@@ -92,6 +92,16 @@ export function App() {
         } catch (e) {
           console.error('Failed to poll live metrics from backend:', e);
         }
+      } else {
+        try {
+          const res = await fetch('/api/metrics');
+          if (res.ok) {
+            const m = await res.json();
+            if (m) setMetrics(m);
+          }
+        } catch (e) {
+          console.error('Failed to poll live metrics from API:', e);
+        }
       }
     }, 1000);
 
