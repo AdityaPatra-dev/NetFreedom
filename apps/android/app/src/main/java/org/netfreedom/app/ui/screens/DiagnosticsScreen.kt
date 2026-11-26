@@ -13,7 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AlertTriangle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -264,7 +264,7 @@ fun DiagnosticsScreen() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (res.passed) Icons.Default.CheckCircle else Icons.Default.AlertTriangle,
+                        imageVector = if (res.passed) Icons.Default.CheckCircle else Icons.Default.Warning,
                         contentDescription = "Status",
                         tint = if (res.passed) EmeraldSuccess else Color(0xFFFFB74D),
                         modifier = Modifier.size(22.dp)
