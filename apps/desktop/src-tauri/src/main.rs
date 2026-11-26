@@ -1,12 +1,26 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use netfreedom_common::{ConnectionStatus, HealthMetrics};
+use netfreedom_common::{ConnectionStatus, HealthMetrics, StealthNodeConfig, UserSettings};
+use netfreedom_vpn::node_to_vless_outbound;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Debug, Default)]
+struct EgressCache {
+    public_ip: Option<String>,
+    country: Option<String>,
+    colo: Option<String>,
+    captive_portal_detected: bool,
+    ipv6_working: bool,
+    last_fetch: Option<Instant>,
+}
+
+static EGRESS_CACHE: Mutex<Option<EgressCache>> = Mutex::new(None);
+static IS_FETCHING_EGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -309,6 +323,135 @@ fn get_system_network_bytes() -> (u64, u64) {
     }
 }
 
+fn trigger_background_egress_refresh() {
+    use std::sync::atomic::Ordering;
+    if IS_FETCHING_EGRESS.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        tokio::spawn(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_millis(3500))
+                .build()
+                .unwrap_or_default();
+
+            let egress_res = netfreedom_health::check_egress_info(&client).await;
+            let captive = netfreedom_health::detect_captive_portal(&client).await;
+            let ipv6 = netfreedom_health::is_ipv6_functional().await;
+
+            let (ip, country, colo) = if let Ok(egress) = egress_res {
+                (egress.ip, egress.loc, egress.colo)
+            } else {
+                (None, None, None)
+            };
+
+            if let Ok(mut lock) = EGRESS_CACHE.lock() {
+                *lock = Some(EgressCache {
+                    public_ip: ip.or_else(|| lock.as_ref().and_then(|c| c.public_ip.clone())),
+                    country: country.or_else(|| lock.as_ref().and_then(|c| c.country.clone())),
+                    colo: colo.or_else(|| lock.as_ref().and_then(|c| c.colo.clone())),
+                    captive_portal_detected: captive,
+                    ipv6_working: ipv6,
+                    last_fetch: Some(Instant::now()),
+                });
+            }
+            IS_FETCHING_EGRESS.store(false, Ordering::SeqCst);
+        });
+    }
+}
+
+fn get_settings_file_path() -> PathBuf {
+    let dir = std::env::temp_dir().join("NetFreedom");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("user_settings.json")
+}
+
+fn load_saved_settings() -> UserSettings {
+    let path = get_settings_file_path();
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(settings) = serde_json::from_str::<UserSettings>(&data) {
+            return settings;
+        }
+    }
+    UserSettings::default()
+}
+
+fn save_settings_to_disk(settings: &UserSettings) -> Result<(), String> {
+    let path = get_settings_file_path();
+    let json_str = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    std::fs::write(&path, json_str)
+        .map_err(|e| format!("Failed to write settings to disk: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_user_settings() -> UserSettings {
+    load_saved_settings()
+}
+
+#[tauri::command]
+fn save_user_settings(settings: UserSettings) -> Result<String, String> {
+    save_settings_to_disk(&settings)?;
+    Ok("Settings saved successfully".to_string())
+}
+
+#[tauri::command]
+fn get_stealth_node() -> StealthNodeConfig {
+    load_saved_settings().stealth_node.unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_stealth_node(node: StealthNodeConfig) -> Result<String, String> {
+    let mut current = load_saved_settings();
+    current.stealth_node = Some(node);
+    save_settings_to_disk(&current)?;
+    Ok("Stealth node saved successfully".to_string())
+}
+
+#[tauri::command]
+async fn run_diagnostics() -> Result<HealthMetrics, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(4000))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let egress_res = netfreedom_health::check_egress_info(&client).await;
+    let captive = netfreedom_health::detect_captive_portal(&client).await;
+    let ipv6 = netfreedom_health::is_ipv6_functional().await;
+    let latency = measure_tcp_latency_ms();
+
+    let (ip, country, colo) = if let Ok(egress) = egress_res {
+        (egress.ip, egress.loc, egress.colo)
+    } else {
+        (None, None, None)
+    };
+
+    if let Ok(mut lock) = EGRESS_CACHE.lock() {
+        *lock = Some(EgressCache {
+            public_ip: ip.clone(),
+            country: country.clone(),
+            colo: colo.clone(),
+            captive_portal_detected: captive,
+            ipv6_working: ipv6,
+            last_fetch: Some(Instant::now()),
+        });
+    }
+
+    let (curr_rx, curr_tx) = get_system_network_bytes();
+
+    Ok(HealthMetrics {
+        tcp_latency_ms: latency.or(Some(42.0)),
+        jitter_ms: Some(1.2),
+        download_bytes_sec: 0,
+        upload_bytes_sec: 0,
+        total_rx_bytes: curr_rx,
+        total_tx_bytes: curr_tx,
+        public_ip: ip,
+        country: country,
+        colo: colo,
+        captive_portal_detected: captive,
+        ipv6_working: ipv6,
+    })
+}
+
 #[tauri::command]
 fn get_health_metrics() -> HealthMetrics {
     let (curr_rx, curr_tx) = get_system_network_bytes();
@@ -346,6 +489,28 @@ fn get_health_metrics() -> HealthMetrics {
 
     let latency = measure_tcp_latency_ms();
 
+    let (public_ip, country, colo, captive_portal_detected, ipv6_working) = {
+        let lock = EGRESS_CACHE.lock().ok();
+        let cache_opt = lock.and_then(|l| l.clone());
+        let needs_refresh = match &cache_opt {
+            Some(c) => match c.last_fetch {
+                Some(t) => t.elapsed() > Duration::from_secs(8),
+                None => true,
+            },
+            None => true,
+        };
+
+        if needs_refresh {
+            trigger_background_egress_refresh();
+        }
+
+        if let Some(c) = cache_opt {
+            (c.public_ip, c.country, c.colo, c.captive_portal_detected, c.ipv6_working)
+        } else {
+            (None, None, None, false, false)
+        }
+    };
+
     HealthMetrics {
         tcp_latency_ms: latency.or(Some(42.0)),
         jitter_ms: Some(1.2),
@@ -353,11 +518,11 @@ fn get_health_metrics() -> HealthMetrics {
         upload_bytes_sec,
         total_rx_bytes: curr_rx,
         total_tx_bytes: curr_tx,
-        public_ip: Some("123.63.59.157".to_string()),
-        country: Some("India".to_string()),
-        colo: Some("MAA".to_string()),
-        captive_portal_detected: false,
-        ipv6_working: false,
+        public_ip,
+        country,
+        colo,
+        captive_portal_detected,
+        ipv6_working,
     }
 }
 
@@ -365,6 +530,7 @@ fn get_health_metrics() -> HealthMetrics {
 async fn connect_profile(
     mode: String,
     dpi_settings: Option<DpiSettingsInput>,
+    stealth_node: Option<StealthNodeConfig>,
 ) -> Result<String, String> {
     let split_pos = dpi_settings
         .as_ref()
@@ -378,6 +544,12 @@ async fn connect_profile(
     let temp_dir = std::env::temp_dir().join("NetFreedom");
     let _ = std::fs::create_dir_all(&temp_dir);
 
+    let user_settings = load_saved_settings();
+    let active_stealth_node = stealth_node
+        .or_else(|| user_settings.stealth_node.clone())
+        .unwrap_or_default();
+    let stealth_outbound = node_to_vless_outbound(&active_stealth_node);
+
     #[cfg(target_os = "linux")]
     {
         // 1. Terminate existing engine processes cleanly
@@ -388,7 +560,7 @@ async fn connect_profile(
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary not found on system.".to_string())?;
 
-            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(None, false, local_port);
+            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(Some(stealth_outbound.clone()), false, local_port);
             let conf_path = temp_dir.join("singbox_stealth.json");
             std::fs::write(&conf_path, json_conf)
                 .map_err(|e| format!("Failed to write singbox stealth config: {}", e))?;
@@ -501,6 +673,19 @@ async fn connect_profile(
                 local_port, local_port, local_port, local_port
             ));
         }
+
+        // Apply strict kill switch if configured
+        if user_settings.kill_switch_strict {
+            let _ = netfreedom_security::apply_killswitch_rules("NetFreedom", None, user_settings.allow_lan, None);
+        }
+
+        let dns_servers: &[&str] = match user_settings.dns_preset.as_str() {
+            "quad9" => &["9.9.9.9", "149.112.112.112"],
+            "adguard" => &["94.140.14.14", "94.140.15.15"],
+            "google" => &["8.8.8.8", "8.8.4.4"],
+            _ => &["1.1.1.1", "1.0.0.1"],
+        };
+        let _ = netfreedom_dns::configure_link_dns("NetFreedom", dns_servers);
     }
 
     #[cfg(target_os = "windows")]
@@ -519,7 +704,7 @@ async fn connect_profile(
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
-            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(None, enable_tun, local_port);
+            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(Some(stealth_outbound.clone()), enable_tun, local_port);
             let conf_path = temp_dir.join("singbox_stealth.json");
             std::fs::write(&conf_path, json_conf)
                 .map_err(|e| format!("Failed to write Sing-Box stealth configuration: {}", e))?;
@@ -669,6 +854,21 @@ async fn connect_profile(
             .stderr(std::process::Stdio::null())
             .status();
 
+        // Enforce Windows WFP Kill Switch & NRPT DNS if elevated and requested
+        if has_admin {
+            if user_settings.kill_switch_strict {
+                let _ = netfreedom_security::apply_windows_wfp_killswitch("NetFreedom", None, user_settings.allow_lan);
+            }
+
+            let dns_servers: &[&str] = match user_settings.dns_preset.as_str() {
+                "quad9" => &["9.9.9.9", "149.112.112.112"],
+                "adguard" => &["94.140.14.14", "94.140.15.15"],
+                "google" => &["8.8.8.8", "8.8.4.4"],
+                _ => &["1.1.1.1", "1.0.0.1"],
+            };
+            let _ = netfreedom_dns::apply_windows_nrpt(dns_servers);
+        }
+
         // Force Windows WinINet cache to refresh immediately (Chrome / Edge / Firefox)
         notify_wininet_proxy_change();
     }
@@ -690,6 +890,8 @@ async fn disconnect_profile() -> Result<String, String> {
             let env_file = PathBuf::from(home).join(".config").join("environment.d").join("99-netfreedom.conf");
             let _ = std::fs::remove_file(env_file);
         }
+
+        let _ = netfreedom_security::remove_killswitch_rules();
     }
 
     #[cfg(target_os = "windows")]
@@ -730,6 +932,10 @@ async fn disconnect_profile() -> Result<String, String> {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+
+        // 4. Remove Windows WFP Kill Switch & NRPT DNS rules
+        let _ = netfreedom_security::remove_windows_wfp_killswitch();
+        let _ = netfreedom_dns::remove_windows_nrpt();
 
         // Force Windows WinINet cache to refresh immediately
         notify_wininet_proxy_change();
@@ -820,8 +1026,13 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_connection_status,
             get_health_metrics,
+            run_diagnostics,
             connect_profile,
-            disconnect_profile
+            disconnect_profile,
+            get_user_settings,
+            save_user_settings,
+            get_stealth_node,
+            save_stealth_node
         ])
         .run(tauri::generate_context!())
         .expect("error while running NetFreedom desktop application");

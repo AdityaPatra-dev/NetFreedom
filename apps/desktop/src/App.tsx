@@ -111,7 +111,7 @@ export function App() {
     setStatus('connecting');
     if (isTauriEnv) {
       try {
-        await invoke('connect_profile', { mode: targetMode, dpiSettings });
+        await invoke('connect_profile', { mode: targetMode, dpiSettings, stealthNode: null });
         setStatus('connected');
         const m = await invoke<HealthMetrics>('get_health_metrics');
         if (m) setMetrics(m);
@@ -221,7 +221,7 @@ export function App() {
             onRefreshMetrics={async () => {
               if (isTauriEnv) {
                 try {
-                  const m = await invoke<HealthMetrics>('get_health_metrics');
+                  const m = await invoke<HealthMetrics>('run_diagnostics');
                   if (m) setMetrics(m);
                 } catch (e) {
                   console.error('Diagnostic metric refresh failed:', e);

@@ -6,6 +6,8 @@ use std::net::SocketAddr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperatingMode {
+    /// 1-Click encrypted TLS 1.3 tunnel over TCP Port 443 (VLESS over WebSocket)
+    StealthTunnel,
     /// 1-Click zero-config WireGuard tunnel to Cloudflare Anycast edge
     WarpShield,
     /// Serverless DPI bypass using TCP/TLS manipulation (ByeDPI / Zapret)
@@ -103,6 +105,7 @@ pub struct ConnectionProfile {
     pub dpi_config: Option<DpiConfig>,
     pub warp_config: Option<WarpConfig>,
     pub wireguard_config: Option<WireGuardConfig>,
+    pub stealth_config: Option<StealthNodeConfig>,
     pub proxy_config: Option<ProxyConfig>,
     pub kill_switch_enabled: bool,
     pub allow_lan: bool,
@@ -136,3 +139,53 @@ pub struct HealthMetrics {
     /// IPv6 status on current network
     pub ipv6_working: bool,
 }
+
+/// Cloudflare Worker or VLESS Relay node configuration for Stealth Tunnel (TCP 443)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StealthNodeConfig {
+    /// Cloudflare CDN Anycast IP or direct IP (default: "104.16.132.229")
+    pub server: String,
+    /// Destination TLS port (default: 443)
+    pub server_port: u16,
+    /// VLESS UUID key
+    pub uuid: String,
+    /// Cloudflare Worker hostname or domain (e.g. "my-tunnel.workers.dev")
+    pub host: String,
+    /// WebSocket path (default: "/?ed=2048")
+    pub path: String,
+}
+
+impl Default for StealthNodeConfig {
+    fn default() -> Self {
+        Self {
+            server: "104.16.132.229".to_string(),
+            server_port: 443,
+            uuid: "d342d110-d4a3-45c3-b0a3-3b11815b80b2".to_string(),
+            host: "cloudflare.com".to_string(),
+            path: "/?ed=2048".to_string(),
+        }
+    }
+}
+
+/// Persistent user settings across sessions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSettings {
+    pub kill_switch_strict: bool,
+    pub allow_lan: bool,
+    pub dns_preset: String,
+    pub mtu: u16,
+    pub stealth_node: Option<StealthNodeConfig>,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            kill_switch_strict: false,
+            allow_lan: true,
+            dns_preset: "cloudflare".to_string(),
+            mtu: 1420,
+            stealth_node: None,
+        }
+    }
+}
+

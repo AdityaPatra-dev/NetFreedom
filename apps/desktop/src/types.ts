@@ -36,3 +36,19 @@ export interface DpiSettings {
   fake_rst: boolean;
   local_port: number;
 }
+
+export interface StealthNodeConfig {
+  server: string;
+  server_port: number;
+  uuid: string;
+  host: string;
+  path: string;
+}
+
+export interface UserSettings {
+  kill_switch_strict: boolean;
+  allow_lan: boolean;
+  dns_preset: string;
+  mtu: number;
+  stealth_node?: StealthNodeConfig | null;
+}

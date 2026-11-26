@@ -2241,8 +2241,11 @@ name = "netfreedom-desktop"
 version = "0.1.0"
 dependencies = [
  "netfreedom-common",
- "netfreedom-tun",
+ "netfreedom-dns",
+ "netfreedom-health",
+ "netfreedom-security",
  "netfreedom-vpn",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
@@ -2251,11 +2254,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "netfreedom-tun"
+name = "netfreedom-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "netfreedom-common",
+ "reqwest 0.12.28",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "netfreedom-health"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "netfreedom-common",
+ "reqwest 0.12.28",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "netfreedom-security"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "netfreedom-common",
+ "serde",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]

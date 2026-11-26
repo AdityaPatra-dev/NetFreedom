@@ -3,7 +3,9 @@ pub mod tunnel;
 pub mod warp_client;
 pub mod wireguard;
 
-pub use singbox_config::{generate_singbox_stealth_config, generate_singbox_warp_config};
+pub use singbox_config::{
+    generate_singbox_stealth_config, generate_singbox_warp_config, node_to_vless_outbound,
+};
 pub use tunnel::WireGuardTunnel;
 pub use warp_client::{
     generate_warp_keypair, get_or_register_warp_account, register_warp_account,

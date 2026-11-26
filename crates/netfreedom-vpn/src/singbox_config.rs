@@ -1,5 +1,31 @@
-use netfreedom_common::WarpConfig;
+use netfreedom_common::{StealthNodeConfig, WarpConfig};
 use serde_json::json;
+
+/// Converts a user-configured StealthNodeConfig into a Sing-Box VLESS outbound object.
+pub fn node_to_vless_outbound(node: &StealthNodeConfig) -> serde_json::Value {
+    json!({
+        "type": "vless",
+        "tag": "stealth-out",
+        "server": node.server,
+        "server_port": node.server_port,
+        "uuid": node.uuid,
+        "tls": {
+            "enabled": true,
+            "server_name": node.host,
+            "utls": {
+                "enabled": true,
+                "fingerprint": "chrome"
+            }
+        },
+        "transport": {
+            "type": "ws",
+            "path": node.path,
+            "headers": {
+                "Host": node.host
+            }
+        }
+    })
+}
 
 /// Generates a valid Sing-Box JSON configuration file for Cloudflare WARP.
 /// Supports both full-system TUN mode (via Wintun on Windows or tun on Linux)
@@ -117,30 +143,9 @@ pub fn generate_singbox_stealth_config(
         "listen_port": socks_port
     }));
 
-    // Default TCP 443 outbound using standard Cloudflare CDN WebSocket encapsulation
+    // Outbound using user-specified stealth node or standard default
     let stealth_outbound = custom_node_opt.unwrap_or_else(|| {
-        json!({
-            "type": "vless",
-            "tag": "stealth-out",
-            "server": "104.16.132.229",
-            "server_port": 443,
-            "uuid": "d342d110-d4a3-45c3-b0a3-3b11815b80b2",
-            "tls": {
-                "enabled": true,
-                "server_name": "cloudflare.com",
-                "utls": {
-                    "enabled": true,
-                    "fingerprint": "chrome"
-                }
-            },
-            "transport": {
-                "type": "ws",
-                "path": "/?ed=2048",
-                "headers": {
-                    "Host": "cloudflare.com"
-                }
-            }
-        })
+        node_to_vless_outbound(&StealthNodeConfig::default())
     });
 
     let config = json!({
