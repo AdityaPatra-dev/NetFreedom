@@ -19,6 +19,16 @@ data class NetworkProfile(
             dnsServer = "1.1.1.1",
             ipv6Block = true
         )
+        val DEFAULT_STEALTH_TUNNEL = NetworkProfile(
+            id = "stealth-tunnel",
+            name = "Campus Wi-Fi Stealth (TCP 443)",
+            mode = ConnectivityMode.STEALTH_TUNNEL,
+            serverHost = "104.16.132.229",
+            serverPort = 443,
+            dnsServer = "1.1.1.1",
+            ipv6Block = true,
+            dpiConfig = DpiConfig(splitPos = "2+s", fakeTtl = 3, ttlModifier = -1)
+        )
         val DEFAULT_WARP = NetworkProfile(
             id = "warp-shield",
             name = "WARP Shield (Edge)",

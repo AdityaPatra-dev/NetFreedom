@@ -51,18 +51,59 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args: Vec<String> = env::args().collect();
-    let command = args.get(1).map(|s| s.as_str()).unwrap_or("auto");
+
+    #[cfg(target_os = "windows")]
+    if args.len() <= 1 {
+        // If double-clicked from Explorer and NetFreedom-GUI.exe is present, launch the visual GUI
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(parent) = exe_path.parent() {
+                let gui_candidates = [
+                    parent.join("NetFreedom-GUI.exe"),
+                    parent.join("netfreedom-desktop.exe"),
+                    parent.join("NetFreedom.exe"),
+                ];
+                for gui in &gui_candidates {
+                    if gui.exists() {
+                        let _ = std::process::Command::new(gui).spawn();
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
 
     println!("============================================================");
     println!("      NetFreedom: Universal Privacy & Connectivity Engine   ");
     println!("============================================================");
+
+    let command = if let Some(cmd) = args.get(1) {
+        cmd.clone()
+    } else {
+        println!("No command specified. Choose an action:");
+        println!("  [1] Connect Stealth Bypass (Auto-Pilot / DPI Desync)");
+        println!("  [2] Disconnect & Restore Direct Network");
+        println!("  [3] Run Full Network Diagnostics");
+        println!("  [4] Launch Desktop GUI");
+        println!("  [5] Exit");
+        print!("\nEnter choice [1-5] (default: 1): ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let mut choice = String::new();
+        let _ = std::io::stdin().read_line(&mut choice);
+        match choice.trim() {
+            "2" => "off".to_string(),
+            "3" => "diag".to_string(),
+            "4" => "gui".to_string(),
+            "5" => return Ok(()),
+            _ => "on".to_string(),
+        }
+    };
 
     let client = reqwest::Client::builder()
         .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
         .timeout(Duration::from_secs(6))
         .build()?;
 
-    match command {
+    match command.as_str() {
         "on" | "start" | "connect" => {
             println!("\n[>] Activating NetFreedom Stealth Bypass & System Proxy...");
             #[cfg(target_os = "linux")]
@@ -268,10 +309,36 @@ async fn main() -> anyhow::Result<()> {
         }
 
         "gui" => {
-            println!("\n[>] Launching NetFreedom Desktop GUI at http://127.0.0.1:1420...");
-            let _ = std::process::Command::new("xdg-open")
-                .arg("http://127.0.0.1:1420")
-                .spawn();
+            println!("\n[>] Launching NetFreedom Desktop GUI...");
+            #[cfg(target_os = "windows")]
+            {
+                let mut launched = false;
+                if let Ok(exe_path) = std::env::current_exe() {
+                    if let Some(parent) = exe_path.parent() {
+                        let gui_candidates = [
+                            parent.join("NetFreedom-GUI.exe"),
+                            parent.join("netfreedom-desktop.exe"),
+                            parent.join("NetFreedom.exe"),
+                        ];
+                        for gui in &gui_candidates {
+                            if gui.exists() {
+                                let _ = std::process::Command::new(gui).spawn();
+                                launched = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !launched {
+                    let _ = std::process::Command::new("cmd").args(&["/C", "start", "http://127.0.0.1:1420"]).spawn();
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = std::process::Command::new("xdg-open")
+                    .arg("http://127.0.0.1:1420")
+                    .spawn();
+            }
         }
 
         "auto" => {

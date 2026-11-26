@@ -490,6 +490,17 @@ async fn connect_profile(
                     .status();
             }
         }
+
+        // Desktop-agnostic systemd environment proxy for XFCE, i3, Sway, Hyprland, etc.
+        if let Ok(home) = std::env::var("HOME") {
+            let env_dir = PathBuf::from(home).join(".config").join("environment.d");
+            let _ = std::fs::create_dir_all(&env_dir);
+            let env_file = env_dir.join("99-netfreedom.conf");
+            let _ = std::fs::write(&env_file, format!(
+                "all_proxy=socks5://127.0.0.1:{}\nALL_PROXY=socks5://127.0.0.1:{}\nhttp_proxy=http://127.0.0.1:{}\nhttps_proxy=http://127.0.0.1:{}\n",
+                local_port, local_port, local_port, local_port
+            ));
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -674,6 +685,11 @@ async fn disconnect_profile() -> Result<String, String> {
             .status();
         let _ = Command::new("pkill").args(&["-9", "-f", "ciadpi"]).status();
         let _ = Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
+
+        if let Ok(home) = std::env::var("HOME") {
+            let env_file = PathBuf::from(home).join(".config").join("environment.d").join("99-netfreedom.conf");
+            let _ = std::fs::remove_file(env_file);
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -722,7 +738,84 @@ async fn disconnect_profile() -> Result<String, String> {
     Ok("Disconnected".to_string())
 }
 
+#[cfg(target_os = "windows")]
+fn check_and_prompt_webview2() {
+    let mut installed = false;
+    let paths = [
+        "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-F501-47DD-8A04-6876D2EBE2C2}",
+        "HKCU\\Software\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-F501-47DD-8A04-6876D2EBE2C2}",
+    ];
+    for p in &paths {
+        if let Ok(out) = win_cmd("reg").args(&["query", p, "/v", "pv"]).output() {
+            if out.status.success() {
+                installed = true;
+                break;
+            }
+        }
+    }
+    if !installed {
+        let pf = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+        let dir = PathBuf::from(pf).join("Microsoft").join("EdgeWebView").join("Application");
+        if dir.exists() {
+            installed = true;
+        }
+    }
+
+    if !installed {
+        unsafe {
+            type MessageBoxWFn = unsafe extern "system" fn(*mut std::ffi::c_void, *const u16, *const u16, u32) -> i32;
+            extern "system" {
+                fn LoadLibraryA(lpLibFileName: *const i8) -> *mut std::ffi::c_void;
+                fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
+            }
+            let h_user32 = LoadLibraryA(b"user32.dll\0".as_ptr() as *const i8);
+            if !h_user32.is_null() {
+                let proc = GetProcAddress(h_user32, b"MessageBoxW\0".as_ptr() as *const i8);
+                if !proc.is_null() {
+                    let func: MessageBoxWFn = std::mem::transmute(proc);
+                    let text: Vec<u16> = "Microsoft Edge WebView2 Runtime is required to run NetFreedom Desktop.\n\nWould you like to open the official Microsoft download page now?\0".encode_utf16().collect();
+                    let caption: Vec<u16> = "NetFreedom - WebView2 Required\0".encode_utf16().collect();
+                    let res = func(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), 4 | 0x30);
+                    if res == 6 {
+                        let _ = win_cmd("cmd").args(&["/C", "start", "https://go.microsoft.com/fwlink/p/?LinkId=2124703"]).spawn();
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("NetFreedom unexpected crash: {}", info);
+        eprintln!("{}", msg);
+        let temp_dir = std::env::temp_dir().join("NetFreedom");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let _ = std::fs::write(temp_dir.join("crash.log"), &msg);
+
+        #[cfg(target_os = "windows")]
+        unsafe {
+            type MessageBoxWFn = unsafe extern "system" fn(*mut std::ffi::c_void, *const u16, *const u16, u32) -> i32;
+            extern "system" {
+                fn LoadLibraryA(lpLibFileName: *const i8) -> *mut std::ffi::c_void;
+                fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
+            }
+            let h_user32 = LoadLibraryA(b"user32.dll\0".as_ptr() as *const i8);
+            if !h_user32.is_null() {
+                let proc = GetProcAddress(h_user32, b"MessageBoxW\0".as_ptr() as *const i8);
+                if !proc.is_null() {
+                    let func: MessageBoxWFn = std::mem::transmute(proc);
+                    let text: Vec<u16> = format!("NetFreedom encountered an error:\n\n{}\n\nLog saved to %TEMP%\\NetFreedom\\crash.log\0", info).encode_utf16().collect();
+                    let caption: Vec<u16> = "NetFreedom Startup Error\0".encode_utf16().collect();
+                    func(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), 0x10);
+                }
+            }
+        }
+    }));
+
+    #[cfg(target_os = "windows")]
+    check_and_prompt_webview2();
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_connection_status,

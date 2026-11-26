@@ -29,6 +29,16 @@ copy /Y "%SCRIPT_DIR%Uninstall.bat" "%INSTALL_DIR%\" >nul 2>nul
 echo [*] Finalizing security permissions...
 powershell -NoProfile -Command "Get-ChildItem -Path '%INSTALL_DIR%' -Recurse | Unblock-File -ErrorAction SilentlyContinue" 2>nul
 
+echo [*] Checking Microsoft Edge WebView2 Runtime...
+reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-F501-47DD-8A04-6876D2EBE2C2}" /v pv >nul 2>nul
+if %errorlevel% neq 0 (
+    reg query "HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-F501-47DD-8A04-6876D2EBE2C2}" /v pv >nul 2>nul
+    if %errorlevel% neq 0 (
+        echo [!] Microsoft Edge WebView2 not found. Automatically provisioning WebView2...
+        powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile '%TEMP%\MicrosoftEdgeWebview2Setup.exe'; Start-Process '%TEMP%\MicrosoftEdgeWebview2Setup.exe' -ArgumentList '/silent /install' -Wait" 2>nul
+    )
+)
+
 echo [*] Creating Desktop Shortcut with Administrator privileges...
 powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $p = [Environment]::GetFolderPath('Desktop') + '\NetFreedom.lnk'; $s = $ws.CreateShortcut($p); $s.TargetPath = '%INSTALL_DIR%\NetFreedom-GUI.exe'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Description = 'NetFreedom Universal Bypass'; $s.Save(); $b = [System.IO.File]::ReadAllBytes($p); $b[21] = $b[21] -bor 0x20; [System.IO.File]::WriteAllBytes($p, $b);"
 

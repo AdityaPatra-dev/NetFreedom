@@ -98,6 +98,7 @@ class NetFreedomVpnService : VpnService() {
                 val isDpiNeeded = true
 
                 val profile = when (mode) {
+                    ConnectivityMode.STEALTH_TUNNEL -> NetworkProfile.DEFAULT_STEALTH_TUNNEL
                     ConnectivityMode.BYEDPI -> NetworkProfile.DEFAULT_BYEDPI
                     ConnectivityMode.HYBRID -> NetworkProfile.DEFAULT_HYBRID
                     ConnectivityMode.WARP -> NetworkProfile.DEFAULT_WARP

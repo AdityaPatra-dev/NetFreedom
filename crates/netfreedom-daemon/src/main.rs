@@ -62,6 +62,11 @@ async fn main() -> Result<()> {
 
     info!("Daemon initialized. Listening for client control and system events...");
 
+    // Start background IPC server for CLI and GUI communication
+    tokio::spawn(async {
+        let _ = netfreedom_daemon::start_ipc_listener().await;
+    });
+
     // Wait for termination signal (Ctrl+C / SIGTERM / systemd stop)
     tokio::select! {
         _ = signal::ctrl_c() => {

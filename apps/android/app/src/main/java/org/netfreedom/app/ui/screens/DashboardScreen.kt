@@ -246,6 +246,7 @@ fun DashboardScreen(
                             Icon(
                                 imageVector = when (mode) {
                                     ConnectivityMode.AUTO -> Icons.Default.Bolt
+                                    ConnectivityMode.STEALTH_TUNNEL -> Icons.Default.Security
                                     ConnectivityMode.WARP -> Icons.Default.Security
                                     ConnectivityMode.BYEDPI -> Icons.Default.Speed
                                     ConnectivityMode.SOCKS5 -> Icons.Default.VpnKey
