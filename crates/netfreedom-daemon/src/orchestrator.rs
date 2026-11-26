@@ -1,6 +1,7 @@
 use anyhow::Result;
 use netfreedom_common::{
-    ConnectionProfile, ConnectionStatus, DpiConfig, HealthMetrics, OperatingMode, WarpConfig,
+    ConnectionProfile, ConnectionStatus, DpiConfig, HealthMetrics, OperatingMode, StealthNodeConfig,
+    WarpConfig,
 };
 use netfreedom_dpi::DpiSupervisor;
 use std::path::PathBuf;
@@ -90,6 +91,68 @@ impl NetFreedomOrchestrator {
         self.status = ConnectionStatus::Connected;
         info!("Successfully connected to Cloudflare WARP Shield at {}", warp_config.endpoint);
 
+        Ok(())
+    }
+
+    /// Connects using the Encrypted Stealth Tunnel (TCP 443) mode.
+    pub async fn connect_stealth(
+        &mut self,
+        stealth_config: StealthNodeConfig,
+        profile_name: String,
+        enable_killswitch: bool,
+    ) -> Result<()> {
+        info!("Initiating Stealth Tunnel (TCP 443) connection: {}", profile_name);
+        self.status = ConnectionStatus::Connecting;
+
+        // 1. Configure safe /1 routes to route all traffic without dropping default gateway
+        let _ = netfreedom_tun::apply_double_slash_one_routes(
+            &self.tun_interface,
+            &self.gateway_ip,
+            &self.physical_dev,
+            Some(&stealth_config.server),
+        );
+
+        // 2. Configure systemd-resolved DNS
+        let _ = netfreedom_dns::configure_link_dns(&self.tun_interface, &["1.1.1.1", "1.0.0.1"]);
+
+        // 3. Configure nftables kill switch if requested
+        if enable_killswitch {
+            let _ = netfreedom_security::apply_killswitch_rules(
+                &self.tun_interface,
+                None,
+                true,
+                Some("10.0.0.0/8"),
+            );
+        }
+
+        self.active_mode = Some(OperatingMode::StealthTunnel);
+        self.status = ConnectionStatus::Connected;
+        info!("Successfully connected in Stealth Tunnel mode to host {}", stealth_config.host);
+
+        Ok(())
+    }
+
+    /// Connects to a complete ConnectionProfile dispatching by operating mode.
+    pub async fn connect_profile_direct(&mut self, profile: ConnectionProfile) -> Result<()> {
+        match profile.mode {
+            OperatingMode::StealthTunnel => {
+                let node = profile.stealth_config.clone().unwrap_or_default();
+                self.connect_stealth(node, profile.name.clone(), profile.kill_switch_enabled).await?;
+            }
+            OperatingMode::WarpShield => {
+                if let Some(cfg) = profile.warp_config.clone() {
+                    self.connect_warp(cfg, profile.name.clone(), profile.kill_switch_enabled).await?;
+                } else {
+                    return Err(anyhow::anyhow!("Missing WarpConfig in profile"));
+                }
+            }
+            OperatingMode::DpiDesync | _ => {
+                let dpi_cfg = profile.dpi_config.clone().unwrap_or_default();
+                let ciadpi_path = PathBuf::from("./third_party/byedpi/ciadpi");
+                self.connect_dpi(dpi_cfg, ciadpi_path, profile.name.clone()).await?;
+            }
+        }
+        self.active_profile = Some(profile);
         Ok(())
     }
 

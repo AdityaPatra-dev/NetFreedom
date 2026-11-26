@@ -16,6 +16,7 @@ netfreedom-vpn = { path = "../netfreedom-vpn" }
 netfreedom-dpi = { path = "../netfreedom-dpi" }
 netfreedom-security = { path = "../netfreedom-security" }
 netfreedom-dns = { path = "../netfreedom-dns" }
+netfreedom-daemon = { path = "../netfreedom-daemon" }
 tokio.workspace = true
 reqwest.workspace = true
 tracing.workspace = true

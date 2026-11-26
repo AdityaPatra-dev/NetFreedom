@@ -21,6 +21,7 @@ netfreedom-dpi = { path = "../netfreedom-dpi" }
 netfreedom-tun = { path = "../netfreedom-tun" }
 netfreedom-security = { path = "../netfreedom-security" }
 netfreedom-dns = { path = "../netfreedom-dns" }
+serde_json.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 tracing.workspace = true

@@ -260,6 +260,10 @@ async fn main() -> anyhow::Result<()> {
 
         "off" | "stop" | "disconnect" => {
             println!("\n[>] Deactivating NetFreedom Bypass...");
+
+            // Notify running daemon via IPC if active
+            let _ = netfreedom_daemon::send_ipc_request(&netfreedom_common::ipc::IpcRequest::Disconnect).await;
+
             #[cfg(target_os = "linux")]
             {
                 let _ = std::process::Command::new("gsettings")
@@ -483,8 +487,47 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        "status" => {
+            println!("\n[>] Querying NetFreedom Daemon & Connection Status...");
+            match netfreedom_daemon::send_ipc_request(&netfreedom_common::ipc::IpcRequest::GetStatus).await {
+                Ok(netfreedom_common::ipc::IpcResponse::Status { status, active_mode, profile_name }) => {
+                    println!("  * Daemon Status:     ONLINE");
+                    println!("  * Connection Status: {:?}", status);
+                    println!("  * Active Mode:       {:?}", active_mode);
+                    if let Some(name) = profile_name {
+                        println!("  * Active Profile:    {}", name);
+                    }
+                }
+                _ => {
+                    println!("  * Daemon IPC:        Offline or Standalone Mode");
+                    println!("  * (Run `netfreedom diag` to inspect live network telemetry)");
+                }
+            }
+        }
+
+        "stealth" => {
+            println!("\n[>] Initiating NetFreedom Stealth Tunnel (Encrypted TCP 443)...");
+            let node = netfreedom_common::StealthNodeConfig::default();
+            let json_conf = netfreedom_vpn::generate_singbox_stealth_config(
+                Some(netfreedom_vpn::node_to_vless_outbound(&node)),
+                false,
+                1080,
+            );
+            let temp_dir = std::env::temp_dir().join("NetFreedom");
+            let _ = std::fs::create_dir_all(&temp_dir);
+            let conf_path = temp_dir.join("singbox_stealth.json");
+            std::fs::write(&conf_path, json_conf)?;
+            println!("[+] Stealth Tunnel configuration written to: {:?}", conf_path);
+            println!("[+] Relay Host: {} (Port {})", node.host, node.server_port);
+            println!("[+] Clean CDN Anycast: {}", node.server);
+            println!("[+] Ready. Launching Sing-Box universal engine...");
+            let _ = std::process::Command::new("sing-box")
+                .args(&["run", "-c", conf_path.to_str().unwrap()])
+                .status();
+        }
+
         _ => {
-            println!("Usage: netfreedom-cli [on | off | gui | auto | warp-reg | dpi-preview | dpi-start | killswitch | dns | diag]");
+            println!("Usage: netfreedom-cli [on | off | gui | auto | status | stealth | warp-reg | dpi-preview | dpi-start | killswitch | dns | diag]");
         }
     }
 

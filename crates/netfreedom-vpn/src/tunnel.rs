@@ -156,3 +156,20 @@ impl Drop for WireGuardTunnel {
         self.stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn test_wireguard_tunnel_lifecycle() {
+        let is_running = Arc::new(AtomicBool::new(true));
+        let tunnel = WireGuardTunnel {
+            is_running: is_running.clone(),
+        };
+        assert!(tunnel.is_running.load(Ordering::Relaxed));
+        tunnel.stop();
+        assert!(!tunnel.is_running.load(Ordering::Relaxed));
+    }
+}

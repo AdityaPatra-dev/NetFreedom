@@ -58,13 +58,16 @@ async fn main() -> Result<()> {
     let (physical_dev, gateway_ip) = detect_default_gateway_and_iface();
     info!("Detected active network: interface={}, gateway={}", physical_dev, gateway_ip);
 
-    let mut orchestrator = NetFreedomOrchestrator::new(tun_dev, gateway_ip, physical_dev);
+    let orchestrator = std::sync::Arc::new(tokio::sync::Mutex::new(
+        NetFreedomOrchestrator::new(tun_dev, gateway_ip, physical_dev),
+    ));
 
     info!("Daemon initialized. Listening for client control and system events...");
 
     // Start background IPC server for CLI and GUI communication
-    tokio::spawn(async {
-        let _ = netfreedom_daemon::start_ipc_listener().await;
+    let orch_clone = orchestrator.clone();
+    tokio::spawn(async move {
+        let _ = netfreedom_daemon::start_ipc_listener(orch_clone).await;
     });
 
     // Wait for termination signal (Ctrl+C / SIGTERM / systemd stop)
@@ -74,7 +77,8 @@ async fn main() -> Result<()> {
         }
     }
 
-    if let Err(e) = orchestrator.disconnect().await {
+    let mut orch = orchestrator.lock().await;
+    if let Err(e) = orch.disconnect().await {
         warn!("Error during daemon disconnect cleanup: {}", e);
     }
 

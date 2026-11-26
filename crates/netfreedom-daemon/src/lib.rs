@@ -4,4 +4,4 @@ pub mod ipc;
 
 pub use orchestrator::NetFreedomOrchestrator;
 pub use windows_service::{WindowsServiceManager, WINDOWS_NAMED_PIPE, WINDOWS_SERVICE_NAME};
-pub use ipc::start_ipc_listener;
+pub use ipc::{send_ipc_request, start_ipc_listener, UNIX_SOCKET_PATH, WINDOWS_PIPE_NAME};

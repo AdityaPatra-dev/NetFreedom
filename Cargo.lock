@@ -808,6 +808,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "netfreedom-common",
+ "netfreedom-daemon",
  "netfreedom-dns",
  "netfreedom-dpi",
  "netfreedom-health",
@@ -843,6 +844,7 @@ dependencies = [
  "netfreedom-tun",
  "netfreedom-vpn",
  "reqwest",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

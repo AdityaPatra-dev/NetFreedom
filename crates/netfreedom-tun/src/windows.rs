@@ -256,3 +256,16 @@ impl Drop for WintunAdapter {
         self.close();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_u16_vec() {
+        let text = "NetFreedomAdapter";
+        let u16_res = to_u16_vec(text);
+        assert_eq!(*u16_res.last().unwrap(), 0u16);
+        assert_eq!(u16_res.len(), text.len() + 1);
+    }
+}
