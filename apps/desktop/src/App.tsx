@@ -133,15 +133,30 @@ export function App() {
       }
     } else {
       try {
+        let stealthNode = null;
+        try {
+          const directNode = localStorage.getItem('netfreedom_stealth_node');
+          if (directNode) stealthNode = JSON.parse(directNode);
+          else {
+            const savedSettings = localStorage.getItem('netfreedom_user_settings');
+            if (savedSettings) stealthNode = JSON.parse(savedSettings).stealth_node || null;
+          }
+        } catch {}
+
         const res = await fetch('/api/connect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: targetMode, dpiSettings }),
+          body: JSON.stringify({ mode: targetMode, dpiSettings, stealthNode }),
         });
         if (res.ok) {
           setStatus('connected');
         } else {
-          setErrorMessage('API connect failed with status: ' + res.status);
+          let errText = 'API connect failed with status: ' + res.status;
+          try {
+            const errJson = await res.json();
+            if (errJson?.error) errText = errJson.error;
+          } catch {}
+          setErrorMessage(errText);
           setStatus('disconnected');
         }
       } catch (err: any) {

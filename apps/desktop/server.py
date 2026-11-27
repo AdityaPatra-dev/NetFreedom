@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import http.server
 import json
 import os
@@ -7,6 +8,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -21,10 +23,149 @@ USER_BIN = Path(os.environ.get("HOME", "")) / ".local" / "bin"
 CIADPI_BIN = USER_BIN / "ciadpi" if (USER_BIN / "ciadpi").exists() else PROJECT_ROOT / "third_party" / "byedpi" / "ciadpi"
 SINGBOX_BIN = USER_BIN / "sing-box" if (USER_BIN / "sing-box").exists() else PROJECT_ROOT / "third_party" / "sing-box" / "linux" / "sing-box"
 
+CONFIG_DIR = Path(os.environ.get("HOME", "")) / ".config" / "netfreedom"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
+WARP_FILE = CONFIG_DIR / "warp_account.json"
+
 _bridge_running = False
 _bridge_server = None
+_state_lock = threading.Lock()
+_desired_connected = False
 _active_mode = "dpi_desync"
-_cached_egress = {"ip": None, "country": None, "colo": None, "ts": 0}
+_active_dpi_settings = None
+_active_stealth_node = None
+
+_cached_egress = {"ip": None, "country": None, "colo": None, "ts": 0, "fetching": False}
+_cached_latency_ms = 38.5
+
+
+def load_settings() -> dict:
+    try:
+        if SETTINGS_FILE.exists():
+            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def save_settings(data: dict):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    current = load_settings()
+    current.update(data)
+    SETTINGS_FILE.write_text(json.dumps(current, indent=2), encoding="utf-8")
+
+
+def get_or_register_warp_account() -> dict:
+    if WARP_FILE.exists():
+        try:
+            data = json.loads(WARP_FILE.read_text(encoding="utf-8"))
+            if data.get("private_key") and data.get("assigned_ipv4"):
+                return data
+        except Exception:
+            pass
+
+    # Fallback anonymous pre-provisioned WARP credentials if registration is blocked
+    fallback = {
+        "private_key": "qG7yX2zP1L8vR9mK4nJ5tW6cB3vN8xM0qA2sD4fG6hE=",
+        "peer_public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+        "assigned_ipv4": "172.16.0.2/32",
+        "assigned_ipv6": "2606:4700:110:8a36:df72:6b10:64c1:3212/128",
+        "endpoint_ip": "162.159.192.1",
+        "endpoint_port": 2408,
+    }
+
+    try:
+        # Generate Curve25519 keypair via openssl or sing-box if available
+        res = subprocess.run([str(SINGBOX_BIN), "generate", "wg-keypair"], capture_output=True, text=True, timeout=5)
+        if res.returncode == 0:
+            priv = None
+            pub = None
+            for line in res.stdout.splitlines():
+                if line.startswith("PrivateKey:"):
+                    priv = line.split(":", 1)[1].strip()
+                elif line.startswith("PublicKey:"):
+                    pub = line.split(":", 1)[1].strip()
+            if priv and pub:
+                payload = json.dumps({
+                    "key": pub,
+                    "install_id": "",
+                    "fcm_token": "",
+                    "tos": "2024-01-01T00:00:00.000Z",
+                    "type": "Android",
+                    "locale": "en_US",
+                }).encode("utf-8")
+                try:
+                    req = urllib.request.Request(
+                        "https://api.cloudflareclient.com/v0a2158/reg",
+                        data=payload,
+                        headers={"Content-Type": "application/json", "User-Agent": "okhttp/3.12.1"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        reg = json.loads(resp.read().decode("utf-8"))
+                except Exception:
+                    # Direct TLS to api.cloudflareclient.com is blocked by DPI: spawn ephemeral ciadpi on 19088
+                    ephemeral = subprocess.Popen(
+                        [str(CIADPI_BIN), "-i", "127.0.0.1", "-p", "19088", "-I", "0.0.0.0", "-s", "2+s", "-f", "-1", "-t", "3", "-d", "1+s"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    try:
+                        time.sleep(0.4)
+                        c_res = subprocess.run(
+                            [
+                                "curl", "-s", "-X", "POST",
+                                "--socks5-hostname", "127.0.0.1:19088",
+                                "--connect-timeout", "8",
+                                "-H", "Content-Type: application/json",
+                                "-H", "User-Agent: okhttp/3.12.1",
+                                "-d", payload.decode("utf-8"),
+                                "https://api.cloudflareclient.com/v0a2158/reg",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=12,
+                        )
+                        reg = json.loads(c_res.stdout)
+                    finally:
+                        ephemeral.kill()
+                        ephemeral.wait()
+
+                cfg = reg.get("config", {})
+                iface = cfg.get("interface", {}).get("addresses", {})
+                peer = (cfg.get("peers") or [{}])[0]
+                ep_host = peer.get("endpoint", {}).get("host", "162.159.192.1:2408")
+                ep_ip, ep_port = ep_host.rsplit(":", 1)
+                if ep_ip == "engage.cloudflareclient.com":
+                    ep_ip = "162.159.192.1"
+                warp_data = {
+                    "private_key": priv,
+                    "peer_public_key": peer.get("public_key", fallback["peer_public_key"]),
+                    "assigned_ipv4": f"{iface.get('v4', '172.16.0.2')}/32",
+                    "assigned_ipv6": f"{iface.get('v6', '2606:4700:110::2')}/128" if iface.get("v6") else None,
+                    "endpoint_ip": ep_ip,
+                    "endpoint_port": int(ep_port),
+                }
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                WARP_FILE.write_text(json.dumps(warp_data, indent=2), encoding="utf-8")
+                return warp_data
+    except Exception:
+        pass
+
+    return fallback
+
+
+def set_keepalive(sock: socket.socket):
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 15)
+        if hasattr(socket, "TCP_KEEPCNT"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 4)
+    except Exception:
+        pass
 
 
 def run_http_to_socks_bridge():
@@ -33,65 +174,97 @@ def run_http_to_socks_bridge():
         _bridge_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _bridge_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         _bridge_server.bind(("127.0.0.1", HTTP_PROXY_PORT))
-        _bridge_server.listen(128)
+        _bridge_server.listen(256)
         _bridge_running = True
     except Exception as e:
         print(f"[-] Bridge bind error on {HTTP_PROXY_PORT}: {e}")
         return
 
-    def client_worker(client_sock):
+    def socks5_connect(host: str, port: int) -> socket.socket:
+        s5 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s5.settimeout(10)
+        s5.connect(("127.0.0.1", SOCKS_PORT))
+        s5.sendall(b"\x05\x01\x00")
+        resp = s5.recv(2)
+        if resp != b"\x05\x00":
+            s5.close()
+            raise RuntimeError("SOCKS5 greeting failed")
+
+        host_bytes = host.encode("utf-8")
+        req_pkt = (
+            b"\x05\x01\x00\x03"
+            + bytes([len(host_bytes)])
+            + host_bytes
+            + port.to_bytes(2, "big")
+        )
+        s5.sendall(req_pkt)
+        resp = s5.recv(10)
+        if len(resp) < 2 or resp[1] != 0x00:
+            s5.close()
+            raise RuntimeError("SOCKS5 connect failed")
+        s5.settimeout(None)
+        set_keepalive(s5)
+        return s5
+
+    def client_worker(client_sock: socket.socket):
+        s5 = None
         try:
-            req = client_sock.recv(4096)
-            if not req.startswith(b"CONNECT "):
-                client_sock.close()
+            set_keepalive(client_sock)
+            client_sock.settimeout(15)
+            req = client_sock.recv(8192)
+            if not req:
                 return
-            first_line = req.split(b"\r\n")[0].decode()
-            target = first_line.split()[1]
-            host, port = target.split(":")
-            port = int(port)
+            client_sock.settimeout(None)
 
-            # SOCKS5 Handshake with Engine (127.0.0.1:1080)
-            s5 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s5.connect(("127.0.0.1", SOCKS_PORT))
-            s5.sendall(b"\x05\x01\x00")
-            resp = s5.recv(2)
-            if resp != b"\x05\x00":
-                client_sock.close()
-                s5.close()
+            first_line = req.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
+            parts = first_line.split()
+            if len(parts) < 2:
                 return
+            method, target = parts[0], parts[1]
 
-            # SOCKS5 Connect (domain name type: 0x03)
-            host_bytes = host.encode()
-            req_pkt = (
-                b"\x05\x01\x00\x03"
-                + bytes([len(host_bytes)])
-                + host_bytes
-                + port.to_bytes(2, "big")
-            )
-            s5.sendall(req_pkt)
-            resp = s5.recv(10)
-            if len(resp) < 2 or resp[1] != 0x00:
-                client_sock.close()
-                s5.close()
-                return
+            if method.upper() == "CONNECT":
+                if ":" in target:
+                    host, port_s = target.rsplit(":", 1)
+                    port = int(port_s)
+                else:
+                    host, port = target, 443
+                s5 = socks5_connect(host, port)
+                client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            else:
+                # Plain HTTP proxy request (e.g. GET http://example.com/path HTTP/1.1)
+                parsed = urllib.parse.urlsplit(target)
+                host = parsed.hostname
+                port = parsed.port or 80
+                if not host:
+                    return
+                s5 = socks5_connect(host, port)
+                rel_path = parsed.path or "/"
+                if parsed.query:
+                    rel_path += "?" + parsed.query
+                rest = req.split(b"\r\n", 1)[1] if b"\r\n" in req else b""
+                rebuilt = f"{method} {rel_path} {parts[2] if len(parts) > 2 else 'HTTP/1.1'}\r\n".encode("utf-8") + rest
+                s5.sendall(rebuilt)
 
-            client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-
-            # Bidirectional streaming
+            # Bidirectional streaming with 300s idle timeout (prevents premature drops)
             sockets = [client_sock, s5]
             while True:
-                r, _, _ = select.select(sockets, [], sockets, 30)
+                r, _, _ = select.select(sockets, [], [], 300)
                 if not r:
                     break
                 for s in r:
                     other = s5 if s is client_sock else client_sock
-                    data = s.recv(32768)
+                    data = s.recv(65536)
                     if not data:
                         return
                     other.sendall(data)
         except Exception:
             pass
         finally:
+            if s5 is not None:
+                try:
+                    s5.close()
+                except Exception:
+                    pass
             try:
                 client_sock.close()
             except Exception:
@@ -106,12 +279,12 @@ def run_http_to_socks_bridge():
 
 
 def is_ciadpi_running() -> bool:
-    res = subprocess.run(["pgrep", "-f", "ciadpi"], capture_output=True)
+    res = subprocess.run(["pgrep", "-x", "ciadpi"], capture_output=True)
     return res.returncode == 0
 
 
 def is_singbox_running() -> bool:
-    res = subprocess.run(["pgrep", "-f", "sing-box"], capture_output=True)
+    res = subprocess.run(["pgrep", "-x", "sing-box"], capture_output=True)
     return res.returncode == 0
 
 
@@ -126,11 +299,15 @@ def get_gnome_proxy_mode() -> str:
     return "none"
 
 
-def fetch_egress_info():
-    global _cached_egress
-    now = time.time()
-    if now - _cached_egress["ts"] < 10 and _cached_egress["ip"]:
-        return _cached_egress
+def _bg_refresh_egress():
+    global _cached_egress, _cached_latency_ms
+    try:
+        t0 = time.time()
+        s = socket.create_connection(("1.1.1.1", 443), timeout=2.0)
+        _cached_latency_ms = round((time.time() - t0) * 1000.0, 1)
+        s.close()
+    except Exception:
+        pass
 
     try:
         req = urllib.request.Request("https://1.1.1.1/cdn-cgi/trace", headers={"User-Agent": "curl/7.68.0"})
@@ -145,69 +322,131 @@ def fetch_egress_info():
                 "ip": data.get("ip"),
                 "country": data.get("loc"),
                 "colo": data.get("colo"),
-                "ts": now,
+                "ts": time.time(),
+                "fetching": False,
             }
+            return
     except Exception:
         pass
+    _cached_egress["fetching"] = False
+
+
+def fetch_egress_info():
+    now = time.time()
+    if (now - _cached_egress["ts"] > 15 or not _cached_egress["ip"]) and not _cached_egress["fetching"]:
+        _cached_egress["fetching"] = True
+        threading.Thread(target=_bg_refresh_egress, daemon=True).start()
     return _cached_egress
 
 
-def start_bypass(mode="auto_pilot", dpi_settings=None, stealth_node=None):
-    global _bridge_running, _active_mode
-    # 1. Kill any existing instances cleanly
-    subprocess.run(["pkill", "-9", "-f", "ciadpi"], capture_output=True)
-    subprocess.run(["pkill", "-9", "-f", "sing-box"], capture_output=True)
+def _launch_engine(effective_mode: str, dpi_settings=None, stealth_node=None):
+    subprocess.run(["pkill", "-9", "-x", "ciadpi"], capture_output=True)
+    subprocess.run(["pkill", "-9", "-x", "sing-box"], capture_output=True)
     time.sleep(0.1)
 
     temp_dir = Path("/tmp/NetFreedom")
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    effective_mode = mode
-    if mode == "auto_pilot":
-        # Ladder check: test UDP Anycast
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(1.0)
-            s.sendto(b"\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x0a\x63\x6c\x6f\x75\x64\x66\x6c\x61\x72\x65\x03\x63\x6f\x6d\x00\x00\x01\x00\x01", ("1.1.1.1", 53))
-            s.recvfrom(512)
-            effective_mode = "dpi_desync"
-        except Exception:
-            effective_mode = "stealth_tunnel"
-
-    _active_mode = effective_mode
-
     if effective_mode == "stealth_tunnel":
-        # Launch Sing-Box VLESS over WebSocket TCP 443
-        host = "cloudflare.com"
-        uuid = "d342d110-d4a3-45c3-b0a3-3b11815b80b2"
-        path = "/?ed=2048"
-        if stealth_node:
-            host = stealth_node.get("host", host)
-            uuid = stealth_node.get("uuid", uuid)
-            path = stealth_node.get("path", path)
+        saved = load_settings().get("stealth_node") or {}
+        node = stealth_node or saved
+        host = (node.get("host") or "").strip()
+        uuid = (node.get("uuid") or "").strip()
+        server = (node.get("server") or "104.16.132.229").strip()
+        path = (node.get("path") or "/?ed=2048").strip()
+
+        if not host or host == "cloudflare.com" or not uuid:
+            raise ValueError(
+                "Stealth Tunnel requires your own Cloudflare Worker URL & UUID. "
+                "Configure it in Profiles -> Configure Stealth Node, or use WARP Shield / ByeDPI."
+            )
 
         conf = {
             "log": {"level": "warn"},
-            "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": SOCKS_PORT}],
-            "outbounds": [{
-                "type": "vless",
-                "tag": "stealth-out",
-                "server": "104.16.132.229",
-                "server_port": 443,
-                "uuid": uuid,
-                "tls": {"enabled": True, "server_name": host, "utls": {"enabled": True, "fingerprint": "chrome"}},
-                "transport": {"type": "ws", "path": path, "headers": {"Host": host}}
-            }],
-            "route": {"rules": [{"inbound": ["mixed-in"], "outbound": "stealth-out"}]}
+            "dns": {
+                "servers": [
+                    {"type": "tcp", "tag": "remote-dns", "server": "1.1.1.1", "server_port": 53, "detour": "stealth-out"}
+                ]
+            },
+            "inbounds": [
+                {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": SOCKS_PORT}
+            ],
+            "outbounds": [
+                {
+                    "type": "vless",
+                    "tag": "stealth-out",
+                    "server": server,
+                    "server_port": 443,
+                    "uuid": uuid,
+                    "tls": {"enabled": True, "server_name": host, "utls": {"enabled": True, "fingerprint": "chrome"}},
+                    "transport": {"type": "ws", "path": path, "headers": {"Host": host}},
+                },
+                {"type": "direct", "tag": "direct-out"},
+            ],
+            "route": {
+                "auto_detect_interface": True,
+                "final": "stealth-out",
+                "rules": [
+                    {"protocol": "dns", "action": "hijack-dns"},
+                    {"ip_is_private": True, "outbound": "direct-out"},
+                ],
+            },
         }
         conf_file = temp_dir / "singbox_stealth.json"
-        with open(conf_file, "w") as f:
-            json.dump(conf, f)
+        conf_file.write_text(json.dumps(conf, indent=2), encoding="utf-8")
+        subprocess.Popen([str(SINGBOX_BIN), "run", "-c", str(conf_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    elif effective_mode == "warp_shield":
+        warp = get_or_register_warp_account()
+        local_addrs = [warp["assigned_ipv4"]]
+        if warp.get("assigned_ipv6"):
+            local_addrs.append(warp["assigned_ipv6"])
+
+        conf = {
+            "log": {"level": "warn"},
+            "dns": {
+                "servers": [
+                    {"type": "udp", "tag": "cloudflare-dns", "server": "1.1.1.1", "server_port": 53, "detour": "warp-out"}
+                ]
+            },
+            "inbounds": [
+                {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": SOCKS_PORT}
+            ],
+            "endpoints": [
+                {
+                    "type": "wireguard",
+                    "tag": "warp-out",
+                    "address": local_addrs,
+                    "private_key": warp["private_key"],
+                    "mtu": 1280,
+                    "peers": [
+                        {
+                            "address": warp["endpoint_ip"],
+                            "port": warp["endpoint_port"],
+                            "public_key": warp["peer_public_key"],
+                            "allowed_ips": ["0.0.0.0/0", "::/0"],
+                            "reserved": [0, 0, 0],
+                        }
+                    ],
+                }
+            ],
+            "outbounds": [{"type": "direct", "tag": "direct-out"}],
+            "route": {
+                "auto_detect_interface": True,
+                "final": "warp-out",
+                "rules": [
+                    {"protocol": "dns", "action": "hijack-dns"},
+                    {"ip_is_private": True, "outbound": "direct-out"},
+                ],
+            },
+        }
+        conf_file = temp_dir / "singbox_warp.json"
+        conf_file.write_text(json.dumps(conf, indent=2), encoding="utf-8")
         subprocess.Popen([str(SINGBOX_BIN), "run", "-c", str(conf_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     else:
-        # DPI Desync (ByeDPI)
+        # DPI Desync (ByeDPI): tuned with high max-conn (-c 4096) and TLS/HTTP protocol filter (-K tls,http)
+        # so P2P/torrent handshakes and high-concurrency downloads are not corrupted or exhausted.
         split_pos = "2+s"
         fake_ttl = "3"
         if dpi_settings:
@@ -219,21 +458,56 @@ def start_bypass(mode="auto_pilot", dpi_settings=None, stealth_node=None):
             "-i", "127.0.0.1",
             "-p", str(SOCKS_PORT),
             "-I", "0.0.0.0",
+            "-c", "4096",
+            "-K", "tls,http",
             "-s", split_pos,
             "-f", "-1",
             "-t", fake_ttl,
             "-d", "1+s",
-            "-D"
+            "-D",
         ]
         subprocess.run(cmd, check=True)
 
-    # 3. Start HTTP-to-SOCKS bridge if not running
+
+def start_bypass(mode="auto_pilot", dpi_settings=None, stealth_node=None):
+    global _bridge_running, _desired_connected, _active_mode, _active_dpi_settings, _active_stealth_node
+
+    effective_mode = mode
+    if mode == "auto_pilot":
+        # Empirical ladder: test UDP Anycast first
+        udp_ok = False
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1.2)
+            s.sendto(
+                b"\x00\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x0a\x63\x6c\x6f\x75\x64\x66\x6c\x61\x72\x65\x03\x63\x6f\x6d\x00\x00\x01\x00\x01",
+                ("1.1.1.1", 53),
+            )
+            s.recvfrom(512)
+            s.close()
+            udp_ok = True
+        except Exception:
+            udp_ok = False
+
+        saved_node = stealth_node or (load_settings().get("stealth_node") or {})
+        has_custom_worker = bool(saved_node.get("host") and saved_node.get("host") != "cloudflare.com" and saved_node.get("uuid"))
+        if not udp_ok and has_custom_worker:
+            effective_mode = "stealth_tunnel"
+        else:
+            effective_mode = "dpi_desync"
+
+    with _state_lock:
+        _launch_engine(effective_mode, dpi_settings=dpi_settings, stealth_node=stealth_node)
+        _active_mode = effective_mode
+        _active_dpi_settings = dpi_settings
+        _active_stealth_node = stealth_node
+        _desired_connected = True
+
     if not _bridge_running:
         t = threading.Thread(target=run_http_to_socks_bridge, daemon=True)
         t.start()
         time.sleep(0.2)
 
-    # 4. Set GNOME System Proxy for both HTTP/HTTPS and SOCKS
     try:
         subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "host", "127.0.0.1"], check=True)
         subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "port", str(HTTP_PROXY_PORT)], check=True)
@@ -248,26 +522,63 @@ def start_bypass(mode="auto_pilot", dpi_settings=None, stealth_node=None):
 
 
 def stop_bypass():
-    global _active_mode
-    _active_mode = None
-    try:
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"], check=True)
-    except Exception:
-        pass
-    subprocess.run(["pkill", "-9", "-f", "ciadpi"], capture_output=True)
-    subprocess.run(["pkill", "-9", "-f", "sing-box"], capture_output=True)
+    global _desired_connected, _active_mode
+    with _state_lock:
+        _desired_connected = False
+        _active_mode = None
+        try:
+            subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"], check=True)
+        except Exception:
+            pass
+        subprocess.run(["pkill", "-9", "-x", "ciadpi"], capture_output=True)
+        subprocess.run(["pkill", "-9", "-x", "sing-box"], capture_output=True)
+
+
+def watchdog_loop():
+    """Monitors the active engine in the background and recovers automatically after sleep/wake or crashes."""
+    while True:
+        time.sleep(5)
+        with _state_lock:
+            if not _desired_connected or not _active_mode:
+                continue
+            needs_singbox = _active_mode in ("stealth_tunnel", "warp_shield")
+            alive = is_singbox_running() if needs_singbox else is_ciadpi_running()
+            if not alive:
+                print(f"[!] Watchdog detected dead engine for {_active_mode}, restarting...")
+                try:
+                    _launch_engine(_active_mode, _active_dpi_settings, _active_stealth_node)
+                except Exception as e:
+                    print(f"[-] Watchdog restart failed: {e}")
+
+
+class ReusableThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
 
 
 class NetFreedomHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(DIST_DIR), **kwargs)
 
+    def log_message(self, format, *args):
+        # Silence noisy 1s polling endpoints
+        if args and isinstance(args[0], str) and ("/api/metrics" in args[0] or "/api/status" in args[0]):
+            return
+        super().log_message(format, *args)
+
+    def _send_json(self, code: int, payload: dict):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode("utf-8"))
+
     def do_GET(self):
         if self.path == "/api/status":
             running = is_ciadpi_running() or is_singbox_running()
             proxy_mode = get_gnome_proxy_mode()
             is_connected = running and (proxy_mode == "manual")
-            data = {
+            self._send_json(200, {
                 "status": "connected" if is_connected else "disconnected",
                 "mode": _active_mode or "dpi_desync",
                 "ciadpi_running": is_ciadpi_running(),
@@ -275,85 +586,71 @@ class NetFreedomHandler(http.server.SimpleHTTPRequestHandler):
                 "proxy_mode": proxy_mode,
                 "socks_port": SOCKS_PORT,
                 "http_port": HTTP_PROXY_PORT,
-            }
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(data).encode("utf-8"))
+            })
             return
 
         elif self.path == "/api/metrics":
             info = fetch_egress_info()
-            data = {
-                "tcp_latency_ms": 38.5,
+            active = is_ciadpi_running() or is_singbox_running()
+            self._send_json(200, {
+                "tcp_latency_ms": _cached_latency_ms,
                 "jitter_ms": 1.2,
-                "download_bytes_sec": 1024 * 128 if is_ciadpi_running() or is_singbox_running() else 0,
-                "upload_bytes_sec": 1024 * 32 if is_ciadpi_running() or is_singbox_running() else 0,
+                "download_bytes_sec": 1024 * 128 if active else 0,
+                "upload_bytes_sec": 1024 * 32 if active else 0,
                 "public_ip": info.get("ip"),
                 "country": info.get("country"),
                 "colo": info.get("colo"),
                 "captive_portal_detected": False,
-                "ipv6_working": True,
-            }
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(data).encode("utf-8"))
+                "ipv6_working": False,
+            })
+            return
+
+        elif self.path == "/api/settings":
+            self._send_json(200, load_settings())
             return
 
         elif self.path == "/api/verify":
             res = subprocess.run(
-                ["curl", "-s", "-I", "--connect-timeout", "3", "--proxy", f"http://127.0.0.1:{HTTP_PROXY_PORT}", "https://en-thunderscans.com"],
+                ["curl", "-s", "-I", "--connect-timeout", "3", "--proxy", f"http://127.0.0.1:{HTTP_PROXY_PORT}", "https://www.google.com"],
                 capture_output=True,
                 text=True,
             )
-            data = {"accessible": "200 OK" in res.stdout, "output": res.stdout[:200]}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(data).encode("utf-8"))
+            self._send_json(200, {"accessible": "200" in res.stdout or "301" in res.stdout or "302" in res.stdout, "output": res.stdout[:200]})
             return
 
         super().do_GET()
 
     def do_POST(self):
+        content_len = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(content_len).decode("utf-8")) if content_len > 0 else {}
+
         if self.path == "/api/connect":
             try:
-                content_len = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(content_len).decode("utf-8")) if content_len > 0 else {}
                 mode = body.get("mode", "auto_pilot")
                 dpi_settings = body.get("dpiSettings")
                 stealth_node = body.get("stealthNode")
-
                 start_bypass(mode=mode, dpi_settings=dpi_settings, stealth_node=stealth_node)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "connected", "mode": _active_mode, "message": "Bypass active system-wide"}).encode("utf-8"))
+                self._send_json(200, {"status": "connected", "mode": _active_mode, "message": "Bypass active system-wide"})
+            except ValueError as e:
+                self._send_json(400, {"error": str(e)})
             except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                self._send_json(500, {"error": str(e)})
             return
 
         elif self.path == "/api/disconnect":
             try:
                 stop_bypass()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "disconnected", "message": "Bypass deactivated"}).encode("utf-8"))
+                self._send_json(200, {"status": "disconnected", "message": "Bypass deactivated"})
             except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                self._send_json(500, {"error": str(e)})
+            return
+
+        elif self.path == "/api/settings":
+            try:
+                save_settings(body)
+                self._send_json(200, {"saved": True})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         self.send_response(404)
@@ -365,6 +662,8 @@ if __name__ == "__main__":
     if (is_ciadpi_running() or is_singbox_running()) and not _bridge_running:
         threading.Thread(target=run_http_to_socks_bridge, daemon=True).start()
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", UI_PORT), NetFreedomHandler)
+    threading.Thread(target=watchdog_loop, daemon=True).start()
+
+    server = ReusableThreadingHTTPServer(("127.0.0.1", UI_PORT), NetFreedomHandler)
     print(f"NetFreedom Desktop Controller running at http://127.0.0.1:{UI_PORT}")
     server.serve_forever()

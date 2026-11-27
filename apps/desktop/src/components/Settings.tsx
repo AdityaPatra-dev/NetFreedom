@@ -88,6 +88,12 @@ export const Settings: React.FC = () => {
         await invoke('save_stealth_node', { node: stealth_node });
       } else {
         localStorage.setItem('netfreedom_user_settings', JSON.stringify(payload));
+        localStorage.setItem('netfreedom_stealth_node', JSON.stringify(stealth_node));
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
       }
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);

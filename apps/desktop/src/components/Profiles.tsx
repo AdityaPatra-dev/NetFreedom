@@ -61,6 +61,11 @@ export const Profiles: React.FC<ProfilesProps> = ({
         await invoke('save_stealth_node', { node });
       } else {
         localStorage.setItem('netfreedom_stealth_node', JSON.stringify(node));
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stealth_node: node }),
+        });
       }
       setNodeSaved(true);
       setTimeout(() => {

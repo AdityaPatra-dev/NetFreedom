@@ -66,32 +66,37 @@ pub fn generate_singbox_warp_config(warp: &WarpConfig, enable_tun: bool, socks_p
         "dns": {
             "servers": [
                 {
+                    "type": "udp",
                     "tag": "cloudflare-dns",
-                    "address": "1.1.1.1",
+                    "server": "1.1.1.1",
+                    "server_port": 53,
                     "detour": "warp-out"
                 }
             ]
         },
         "inbounds": inbounds,
-        "outbounds": [
+        "endpoints": [
             {
                 "type": "wireguard",
                 "tag": "warp-out",
-                "server": warp.endpoint.ip().to_string(),
-                "server_port": warp.endpoint.port(),
-                "local_address": local_addresses,
+                "address": local_addresses,
                 "private_key": warp.private_key,
-                "peer_public_key": warp.peer_public_key,
-                "reserved": [0, 0, 0],
-                "mtu": 1280
-            },
+                "mtu": 1280,
+                "peers": [
+                    {
+                        "address": warp.endpoint.ip().to_string(),
+                        "port": warp.endpoint.port(),
+                        "public_key": warp.peer_public_key,
+                        "allowed_ips": ["0.0.0.0/0", "::/0"],
+                        "reserved": [0, 0, 0]
+                    }
+                ]
+            }
+        ],
+        "outbounds": [
             {
                 "type": "direct",
                 "tag": "direct-out"
-            },
-            {
-                "type": "dns",
-                "tag": "dns-out"
             }
         ],
         "route": {
@@ -100,7 +105,7 @@ pub fn generate_singbox_warp_config(warp: &WarpConfig, enable_tun: bool, socks_p
             "rules": [
                 {
                     "protocol": "dns",
-                    "outbound": "dns-out"
+                    "action": "hijack-dns"
                 },
                 {
                     "ip_is_private": true,
@@ -156,8 +161,10 @@ pub fn generate_singbox_stealth_config(
         "dns": {
             "servers": [
                 {
+                    "type": "tcp",
                     "tag": "remote-dns",
-                    "address": "tcp://1.1.1.1:53",
+                    "server": "1.1.1.1",
+                    "server_port": 53,
                     "detour": "stealth-out"
                 }
             ]
@@ -168,10 +175,6 @@ pub fn generate_singbox_stealth_config(
             {
                 "type": "direct",
                 "tag": "direct-out"
-            },
-            {
-                "type": "dns",
-                "tag": "dns-out"
             }
         ],
         "route": {
@@ -180,7 +183,7 @@ pub fn generate_singbox_stealth_config(
             "rules": [
                 {
                     "protocol": "dns",
-                    "outbound": "dns-out"
+                    "action": "hijack-dns"
                 },
                 {
                     "ip_is_private": true,
@@ -191,5 +194,38 @@ pub fn generate_singbox_stealth_config(
     });
 
     serde_json::to_string_pretty(&config).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_singbox_stealth_config_1_14_schema() {
+        let json_str = generate_singbox_stealth_config(None, false, 1080);
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["dns"]["servers"][0]["type"], "tcp");
+        assert_eq!(parsed["dns"]["servers"][0]["server"], "1.1.1.1");
+        assert_eq!(parsed["route"]["rules"][0]["action"], "hijack-dns");
+    }
+
+    #[test]
+    fn test_singbox_warp_config_1_14_schema() {
+        let warp = WarpConfig {
+            client_id: "test".to_string(),
+            private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
+            public_key: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=".to_string(),
+            peer_public_key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=".to_string(),
+            assigned_ipv4: "172.16.0.2/32".to_string(),
+            assigned_ipv6: None,
+            endpoint: "162.159.192.1:2408".parse().unwrap(),
+            port: 2408,
+        };
+        let json_str = generate_singbox_warp_config(&warp, false, 1080);
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["endpoints"][0]["type"], "wireguard");
+        assert_eq!(parsed["endpoints"][0]["peers"][0]["port"], 2408);
+        assert_eq!(parsed["dns"]["servers"][0]["type"], "udp");
+    }
 }
 
