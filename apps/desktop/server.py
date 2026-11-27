@@ -37,6 +37,9 @@ _active_stealth_node = None
 
 _cached_egress = {"ip": None, "country": None, "colo": None, "ts": 0, "fetching": False}
 _cached_latency_ms = 38.5
+_cached_jitter_ms = 0.0
+_cached_captive = False
+_cached_ipv6 = False
 
 
 def load_settings() -> dict:
@@ -299,15 +302,60 @@ def get_gnome_proxy_mode() -> str:
     return "none"
 
 
-def _bg_refresh_egress():
-    global _cached_egress, _cached_latency_ms
+def has_tun_capability() -> bool:
     try:
-        t0 = time.time()
-        s = socket.create_connection(("1.1.1.1", 443), timeout=2.0)
-        _cached_latency_ms = round((time.time() - t0) * 1000.0, 1)
-        s.close()
+        if os.geteuid() == 0:
+            return True
+        res = subprocess.run(["getcap", str(SINGBOX_BIN)], capture_output=True, text=True)
+        return "cap_net_admin" in res.stdout
     except Exception:
-        pass
+        return False
+
+
+def get_dns_server_from_settings() -> str:
+    preset = (load_settings().get("dns_preset") or "cloudflare").lower()
+    if preset == "quad9":
+        return "9.9.9.9"
+    if preset == "google":
+        return "8.8.8.8"
+    return "1.1.1.1"
+
+
+def _bg_refresh_egress():
+    global _cached_egress, _cached_latency_ms, _cached_jitter_ms, _cached_captive, _cached_ipv6
+    samples = []
+    for _ in range(3):
+        try:
+            t0 = time.time()
+            s = socket.create_connection(("1.1.1.1", 443), timeout=1.5)
+            samples.append((time.time() - t0) * 1000.0)
+            s.close()
+        except Exception:
+            pass
+    if samples:
+        avg = sum(samples) / len(samples)
+        _cached_latency_ms = round(avg, 1)
+        if len(samples) > 1:
+            variance = sum((x - avg) ** 2 for x in samples) / len(samples)
+            _cached_jitter_ms = round(variance ** 0.5, 1)
+
+    # Captive Portal probe
+    try:
+        req = urllib.request.Request("http://connectivitycheck.gstatic.com/generate_204")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            _cached_captive = resp.status != 204
+    except Exception:
+        _cached_captive = False
+
+    # Dual-stack IPv6 reachability probe
+    try:
+        s6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        s6.settimeout(1.5)
+        s6.connect(("2606:4700:4700::1111", 443))
+        s6.close()
+        _cached_ipv6 = True
+    except Exception:
+        _cached_ipv6 = False
 
     try:
         req = urllib.request.Request("https://1.1.1.1/cdn-cgi/trace", headers={"User-Agent": "curl/7.68.0"})
@@ -346,9 +394,32 @@ def _launch_engine(effective_mode: str, dpi_settings=None, stealth_node=None):
 
     temp_dir = Path("/tmp/NetFreedom")
     temp_dir.mkdir(parents=True, exist_ok=True)
+    settings = load_settings()
+    dns_ip = get_dns_server_from_settings()
+    mtu_val = int(settings.get("mtu") or 1280)
+    use_tun = has_tun_capability()
+
+    inbounds = []
+    if use_tun:
+        inbounds.append({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "netfreedom0",
+            "address": ["172.19.0.1/30"],
+            "mtu": mtu_val,
+            "auto_route": True,
+            "strict_route": True,
+            "stack": "system",
+        })
+    inbounds.append({
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": "127.0.0.1",
+        "listen_port": SOCKS_PORT,
+    })
 
     if effective_mode == "stealth_tunnel":
-        saved = load_settings().get("stealth_node") or {}
+        saved = settings.get("stealth_node") or {}
         node = stealth_node or saved
         host = (node.get("host") or "").strip()
         uuid = (node.get("uuid") or "").strip()
@@ -365,12 +436,10 @@ def _launch_engine(effective_mode: str, dpi_settings=None, stealth_node=None):
             "log": {"level": "warn"},
             "dns": {
                 "servers": [
-                    {"type": "tcp", "tag": "remote-dns", "server": "1.1.1.1", "server_port": 53, "detour": "stealth-out"}
+                    {"type": "tcp", "tag": "remote-dns", "server": dns_ip, "server_port": 53, "detour": "stealth-out"}
                 ]
             },
-            "inbounds": [
-                {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": SOCKS_PORT}
-            ],
+            "inbounds": inbounds,
             "outbounds": [
                 {
                     "type": "vless",
@@ -406,12 +475,10 @@ def _launch_engine(effective_mode: str, dpi_settings=None, stealth_node=None):
             "log": {"level": "warn"},
             "dns": {
                 "servers": [
-                    {"type": "udp", "tag": "cloudflare-dns", "server": "1.1.1.1", "server_port": 53, "detour": "warp-out"}
+                    {"type": "udp", "tag": "cloudflare-dns", "server": dns_ip, "server_port": 53, "detour": "warp-out"}
                 ]
             },
-            "inbounds": [
-                {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": SOCKS_PORT}
-            ],
+            "inbounds": inbounds,
             "endpoints": [
                 {
                     "type": "wireguard",
@@ -469,6 +536,67 @@ def _launch_engine(effective_mode: str, dpi_settings=None, stealth_node=None):
         subprocess.run(cmd, check=True)
 
 
+def set_system_proxy():
+    # 1. GNOME
+    try:
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "host", "127.0.0.1"], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "port", str(HTTP_PROXY_PORT)], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "enabled", "true"], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.https", "host", "127.0.0.1"], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.https", "port", str(HTTP_PROXY_PORT)], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.socks", "port", str(SOCKS_PORT)], check=True)
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "manual"], check=True)
+    except Exception:
+        pass
+
+    # 2. KDE Plasma
+    for kwrite in ("kwriteconfig6", "kwriteconfig5"):
+        try:
+            subprocess.run([kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "1"], capture_output=True)
+            subprocess.run([kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpProxy", f"http://127.0.0.1 {HTTP_PROXY_PORT}"], capture_output=True)
+            subprocess.run([kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "httpsProxy", f"http://127.0.0.1 {HTTP_PROXY_PORT}"], capture_output=True)
+            subprocess.run([kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "socksProxy", f"socks://127.0.0.1 {SOCKS_PORT}"], capture_output=True)
+            break
+        except Exception:
+            pass
+
+    # 3. Universal systemd / XDG environment.d
+    try:
+        env_dir = Path(os.environ.get("HOME", "")) / ".config" / "environment.d"
+        env_dir.mkdir(parents=True, exist_ok=True)
+        (env_dir / "99-netfreedom.conf").write_text(
+            f"http_proxy=http://127.0.0.1:{HTTP_PROXY_PORT}\n"
+            f"https_proxy=http://127.0.0.1:{HTTP_PROXY_PORT}\n"
+            f"all_proxy=socks5h://127.0.0.1:{SOCKS_PORT}\n"
+            f"HTTP_PROXY=http://127.0.0.1:{HTTP_PROXY_PORT}\n"
+            f"HTTPS_PROXY=http://127.0.0.1:{HTTP_PROXY_PORT}\n"
+            f"ALL_PROXY=socks5h://127.0.0.1:{SOCKS_PORT}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def clear_system_proxy():
+    try:
+        subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"], check=True)
+    except Exception:
+        pass
+    for kwrite in ("kwriteconfig6", "kwriteconfig5"):
+        try:
+            subprocess.run([kwrite, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "0"], capture_output=True)
+            break
+        except Exception:
+            pass
+    try:
+        env_file = Path(os.environ.get("HOME", "")) / ".config" / "environment.d" / "99-netfreedom.conf"
+        if env_file.exists():
+            env_file.unlink()
+    except Exception:
+        pass
+
+
 def start_bypass(mode="auto_pilot", dpi_settings=None, stealth_node=None):
     global _bridge_running, _desired_connected, _active_mode, _active_dpi_settings, _active_stealth_node
 
@@ -508,17 +636,7 @@ def start_bypass(mode="auto_pilot", dpi_settings=None, stealth_node=None):
         t.start()
         time.sleep(0.2)
 
-    try:
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "host", "127.0.0.1"], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "port", str(HTTP_PROXY_PORT)], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.http", "enabled", "true"], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.https", "host", "127.0.0.1"], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.https", "port", str(HTTP_PROXY_PORT)], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.socks", "host", "127.0.0.1"], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy.socks", "port", str(SOCKS_PORT)], check=True)
-        subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "manual"], check=True)
-    except Exception as e:
-        print(f"[-] Warning: Failed to set GNOME proxy via gsettings: {e}")
+    set_system_proxy()
 
 
 def stop_bypass():
@@ -526,10 +644,7 @@ def stop_bypass():
     with _state_lock:
         _desired_connected = False
         _active_mode = None
-        try:
-            subprocess.run(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"], check=True)
-        except Exception:
-            pass
+        clear_system_proxy()
         subprocess.run(["pkill", "-9", "-x", "ciadpi"], capture_output=True)
         subprocess.run(["pkill", "-9", "-x", "sing-box"], capture_output=True)
 
@@ -594,14 +709,27 @@ class NetFreedomHandler(http.server.SimpleHTTPRequestHandler):
             active = is_ciadpi_running() or is_singbox_running()
             self._send_json(200, {
                 "tcp_latency_ms": _cached_latency_ms,
-                "jitter_ms": 1.2,
+                "jitter_ms": _cached_jitter_ms,
                 "download_bytes_sec": 1024 * 128 if active else 0,
                 "upload_bytes_sec": 1024 * 32 if active else 0,
                 "public_ip": info.get("ip"),
                 "country": info.get("country"),
                 "colo": info.get("colo"),
-                "captive_portal_detected": False,
-                "ipv6_working": False,
+                "captive_portal_detected": _cached_captive,
+                "ipv6_working": _cached_ipv6,
+            })
+            return
+
+        elif self.path == "/api/diagnostics":
+            _bg_refresh_egress()
+            self._send_json(200, {
+                "tcp_latency_ms": _cached_latency_ms,
+                "jitter_ms": _cached_jitter_ms,
+                "public_ip": _cached_egress.get("ip"),
+                "country": _cached_egress.get("country"),
+                "colo": _cached_egress.get("colo"),
+                "captive_portal_detected": _cached_captive,
+                "ipv6_working": _cached_ipv6,
             })
             return
 
@@ -643,6 +771,19 @@ class NetFreedomHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(200, {"status": "disconnected", "message": "Bypass deactivated"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+            return
+
+        elif self.path == "/api/diagnostics":
+            _bg_refresh_egress()
+            self._send_json(200, {
+                "tcp_latency_ms": _cached_latency_ms,
+                "jitter_ms": _cached_jitter_ms,
+                "public_ip": _cached_egress.get("ip"),
+                "country": _cached_egress.get("country"),
+                "colo": _cached_egress.get("colo"),
+                "captive_portal_detected": _cached_captive,
+                "ipv6_working": _cached_ipv6,
+            })
             return
 
         elif self.path == "/api/settings":

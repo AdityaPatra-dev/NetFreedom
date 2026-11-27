@@ -569,6 +569,9 @@ async fn connect_profile(
         let _ = Command::new("pkill").args(&["-9", "-f", "sing-box"]).status();
 
         if effective_mode == "stealth_tunnel" {
+            if active_stealth_node.host == "cloudflare.com" || active_stealth_node.host.trim().is_empty() {
+                return Err("Stealth Tunnel requires your own Cloudflare Worker URL & UUID. Configure it in Profiles -> Configure Stealth Node, or use WARP Shield / ByeDPI.".to_string());
+            }
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary not found on system.".to_string())?;
 
@@ -713,6 +716,9 @@ async fn connect_profile(
         let enable_tun = has_admin;
 
         if effective_mode == "stealth_tunnel" {
+            if active_stealth_node.host == "cloudflare.com" || active_stealth_node.host.trim().is_empty() {
+                return Err("Stealth Tunnel requires your own Cloudflare Worker URL & UUID. Configure it in Profiles -> Configure Stealth Node, or use WARP Shield / ByeDPI.".to_string());
+            }
             let singbox_bin = find_singbox_binary()
                 .ok_or_else(|| "Sing-Box universal engine binary (sing-box.exe) not found. Please install or place it in the NetFreedom application folder.".to_string())?;
 
@@ -783,6 +789,10 @@ async fn connect_profile(
                 local_port.to_string(),
                 "-I".to_string(),
                 "0.0.0.0".to_string(),
+                "-c".to_string(),
+                "4096".to_string(),
+                "-K".to_string(),
+                "tls,http".to_string(),
                 "-s".to_string(),
                 split_pos,
                 "-f".to_string(),

@@ -16,10 +16,12 @@ export const Diagnostics: React.FC<DiagnosticsProps> = ({ metrics, onRefreshMetr
   const runAllTests = async () => {
     setRunning(true);
     try {
-      if (onRefreshMetrics) {
-        await onRefreshMetrics();
-      } else if (isTauriEnv) {
+      if (isTauriEnv) {
         await invoke('run_diagnostics');
+        if (onRefreshMetrics) await onRefreshMetrics();
+      } else {
+        await fetch('/api/diagnostics', { method: 'POST' });
+        if (onRefreshMetrics) await onRefreshMetrics();
       }
     } catch (e) {
       console.error('Diagnostics execution error:', e);
